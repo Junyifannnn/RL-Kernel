@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from examples.vime_qwen3_8b_tp4_cp2_200.run_arm import (
     _max_engine_decode_batch,
     _mismatch_metrics_args,
     _rollout_topology,
+    _submit_ray_job,
 )
 from examples.vime_qwen3_8b_tp4_cp2_200.run_supplement_suite import specs
 from examples.vime_qwen3_8b_tp4_cp2_200.validate_run import (
@@ -22,6 +24,18 @@ from examples.vime_qwen3_8b_tp4_cp2_200.validate_run import (
     _validate_readbacks,
     _validate_topology,
 )
+
+
+def test_waiting_ray_submission_streams_and_saves_log(tmp_path: Path, capsys):
+    result = _submit_ray_job(
+        [sys.executable, "-c", "print('ray job output')"],
+        wait=True,
+        run_dir=tmp_path,
+    )
+
+    assert result.returncode == 0
+    assert "ray job output" in capsys.readouterr().out
+    assert (tmp_path / "run.log").read_text(encoding="utf-8") == "ray job output\n"
 
 
 def _production_operator(framework: str, target: str, module: str) -> dict:

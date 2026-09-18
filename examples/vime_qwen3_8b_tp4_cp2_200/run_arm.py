@@ -251,6 +251,32 @@ def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _submit_ray_job(
+    command: list[str], *, wait: bool, run_dir: Path
+) -> subprocess.CompletedProcess[str]:
+    if not wait:
+        return subprocess.run(command, capture_output=True, text=True)
+
+    output: list[str] = []
+    with (run_dir / "run.log").open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        if process.stdout is None:
+            raise RuntimeError("Ray submission did not expose its output stream")
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            log_file.write(line)
+            log_file.flush()
+            output.append(line)
+        returncode = process.wait()
+    return subprocess.CompletedProcess(command, returncode, "".join(output), "")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -654,7 +680,24 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    result = subprocess.run(ray_command, capture_output=True, text=True)
+    result = _submit_ray_job(ray_command, wait=args.wait, run_dir=run_dir)
+    if args.wait:
+        status_result = subprocess.run(
+            [
+                str(ray_bin),
+                "job",
+                "status",
+                f"--address={args.ray_address}",
+                submission_id,
+            ],
+            capture_output=True,
+            text=True,
+        )
+        status_text = status_result.stdout
+        if status_result.stderr:
+            status_text += ("\n" if status_text and not status_text.endswith("\n") else "")
+            status_text += status_result.stderr
+        (run_dir / "ray-status.txt").write_text(status_text, encoding="utf-8")
     manifest["submission"] = {
         "returncode": result.returncode,
         "stdout": result.stdout,
@@ -662,8 +705,9 @@ def main(argv: list[str] | None = None) -> int:
     }
     manifest["status"] = "submitted" if result.returncode == 0 else "submission_failed"
     _write_json(manifest_path, manifest)
-    print(result.stdout, end="")
-    print(result.stderr, end="", file=sys.stderr)
+    if not args.wait:
+        print(result.stdout, end="")
+        print(result.stderr, end="", file=sys.stderr)
     print(
         json.dumps(
             {
