@@ -7,6 +7,8 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+import pytest
+
 from examples.vime_qwen3_8b_tp4_cp2_200.run_arm import (
     ARMS,
     MEGATRON_ATTENTION_BACKEND,
@@ -99,6 +101,9 @@ def test_rollout_tp_cp_derive_router_engines_and_graph_batch():
         assert topology["rollout_cp"] == rollout_cp
         assert topology["rollout_gpus_per_engine"] == gpus_per_engine
         assert topology["rollout_engines"] == engines
+        assert topology["evidence_level"] == (
+            "reference" if (rollout_tp, rollout_cp) == (4, 1) else "experimental"
+        )
         assert (
             _max_engine_decode_batch(
                 1,
@@ -114,6 +119,30 @@ def test_rollout_tp_cp_derive_router_engines_and_graph_batch():
     legacy_topology.pop("rollout_tp")
     legacy_topology.pop("rollout_cp")
     assert _validate_topology(legacy_topology) == []
+
+
+def test_experimental_actor_topologies_are_explicit_and_self_consistent():
+    with pytest.raises(ValueError, match="only TP4/CP2"):
+        _rollout_topology(
+            8,
+            1,
+            tensor_parallel_size=8,
+            context_parallel_size=1,
+        )
+
+    topology = _rollout_topology(
+        8,
+        1,
+        tensor_parallel_size=8,
+        context_parallel_size=1,
+        allow_untested_topology=True,
+    )
+    assert topology["tp"] == 8
+    assert topology["cp"] == 1
+    assert topology["rollout_engines"] == 1
+    assert topology["evidence_level"] == "experimental"
+    assert topology["experimental_acknowledged"] is True
+    assert _validate_topology(topology) == []
 
 
 def test_launcher_forces_cuda_graph_without_a_logp_provider():

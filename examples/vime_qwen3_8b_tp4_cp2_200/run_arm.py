@@ -78,12 +78,34 @@ TOPOLOGY = {
 def _rollout_topology(
     rollout_tp_size: int,
     rollout_cp_size: int,
-) -> dict[str, int | bool]:
+    *,
+    tensor_parallel_size: int = 4,
+    context_parallel_size: int = 2,
+    allow_untested_topology: bool = False,
+) -> dict[str, int | bool | str]:
+    if tensor_parallel_size <= 0:
+        raise ValueError("--tp-size must be positive")
+    if context_parallel_size <= 0:
+        raise ValueError("--cp-size must be positive")
     if rollout_tp_size <= 0:
         raise ValueError("--rollout-tp-size must be positive")
     if rollout_cp_size <= 0:
         raise ValueError("--rollout-cp-size must be positive")
     rollout_gpus = int(TOPOLOGY["rollout_gpus"])
+    actor_gpus = int(TOPOLOGY["actor_gpus"])
+    if tensor_parallel_size * context_parallel_size != actor_gpus:
+        raise ValueError(
+            "--tp-size * --cp-size must equal the configured colocated actor GPU count "
+            f"({tensor_parallel_size * context_parallel_size} != {actor_gpus})"
+        )
+    for size, label in ((32, "attention heads"), (8, "query groups"), (152064, "vocabulary")):
+        if size % tensor_parallel_size:
+            raise ValueError(f"--tp-size must divide Qwen3-8B {label} ({size})")
+    if (tensor_parallel_size, context_parallel_size) != (4, 2) and not allow_untested_topology:
+        raise ValueError(
+            "only TP4/CP2 has end-to-end evidence; pass --allow-untested-topology "
+            "for an experimental short run"
+        )
     gpus_per_engine = rollout_tp_size * rollout_cp_size
     if rollout_gpus % gpus_per_engine:
         raise ValueError(
@@ -91,10 +113,20 @@ def _rollout_topology(
             f"rollout GPU count ({gpus_per_engine} does not divide {rollout_gpus})"
         )
     topology = dict(TOPOLOGY)
+    topology["tp"] = tensor_parallel_size
+    topology["cp"] = context_parallel_size
     topology["rollout_tp"] = rollout_tp_size
     topology["rollout_cp"] = rollout_cp_size
     topology["rollout_gpus_per_engine"] = gpus_per_engine
     topology["rollout_engines"] = rollout_gpus // gpus_per_engine
+    is_reference = (
+        tensor_parallel_size,
+        context_parallel_size,
+        rollout_tp_size,
+        rollout_cp_size,
+    ) == (4, 2, 4, 1)
+    topology["evidence_level"] = "reference" if is_reference else "experimental"
+    topology["experimental_acknowledged"] = bool(allow_untested_topology)
     return topology
 
 
@@ -302,6 +334,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rollout-batch-size", type=int, default=1)
     parser.add_argument("--n-samples-per-prompt", type=int, default=8)
     parser.add_argument("--global-batch-size", type=int, default=8)
+    parser.add_argument("--tp-size", type=int, default=4)
+    parser.add_argument("--cp-size", type=int, default=2)
     parser.add_argument(
         "--rollout-tp-size",
         type=int,
@@ -321,6 +355,11 @@ def build_parser() -> argparse.ArgumentParser:
             "this with --rollout-tp-size when deriving GPUs per engine and "
             "router engine count."
         ),
+    )
+    parser.add_argument(
+        "--allow-untested-topology",
+        action="store_true",
+        help="allow a non-TP4/CP2 actor topology for an experimental short run",
     )
     parser.add_argument(
         "--use-kl-loss",
@@ -381,6 +420,9 @@ def main(argv: list[str] | None = None) -> int:
     topology = _rollout_topology(
         args.rollout_tp_size,
         args.rollout_cp_size,
+        tensor_parallel_size=args.tp_size,
+        context_parallel_size=args.cp_size,
+        allow_untested_topology=args.allow_untested_topology,
     )
 
     script_dir = Path(__file__).resolve().parent

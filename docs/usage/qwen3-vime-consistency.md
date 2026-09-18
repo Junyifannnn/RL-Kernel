@@ -8,7 +8,7 @@ environment variables; stable experiment changes belong in a copied profile.
 
 ## Supported reference configuration
 
-The bundled profile targets one Linux node with eight 80 GB NVIDIA H100 GPUs.
+The bundled CUDA profile targets one Linux node with eight 80 GB NVIDIA H100 GPUs.
 Megatron runs TP4/CP2 and two colocated vLLM engines run TP4. The frozen runtime
 contract is Python 3.11.15, PyTorch 2.9.1, vLLM 0.16.0, Ray 2.57.0, and
 Transformer Engine 2.18. Other hardware or topology is development work, not a
@@ -25,6 +25,50 @@ Before starting, provide:
 The launcher uses the active Python environment by default. Set
 `RLK_REPRO_RUNTIME_ROOT` only when the experiment must run in a different
 environment.
+
+## Topology support and evidence
+
+Topology validity and end-to-end evidence are different things. The launcher
+fails closed unless an unproven training topology is explicitly acknowledged.
+
+| Backend | Training topology | Rollout topology | Status |
+|---|---|---|---|
+| CUDA H100 | TP4/CP2 | TP4/CP1, two engines | Supported reference topology; rerun the new no-reuse pair |
+| CUDA H100 | TP4/CP2 | TP2/CP1, TP2/CP2, TP4/CP2, or TP8/CP1 | Command and validator coverage; run an 8-step pair first |
+| CUDA H100 | TP8/CP1, TP2/CP4, or TP1/CP8 | Any 8-GPU-divisible rollout TP×CP | Experimental; configuration checks only |
+| ROCm MI300X | TP4/CP2 | TP4, two engines | Backend/topology has 200-step evidence; rerun the new no-reuse pair |
+| ROCm gfx942 | Other valid TP×CP | Rollout TP dividing available GPUs | Experimental; configuration checks only |
+
+For CUDA, rollout topology is available directly on `plan` and `run`:
+
+```bash
+rlk-repro plan \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode consistency \
+  --rollout-tp-size 2 \
+  --rollout-cp-size 2
+```
+
+Non-TP4/CP2 training layouts additionally require
+`--allow-untested-topology`. For example, an eight-step TP8/CP1 probe is:
+
+```bash
+rlk-repro run \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode consistency \
+  --tp-size 8 \
+  --cp-size 1 \
+  --rollout-tp-size 8 \
+  --rollout-cp-size 1 \
+  --allow-untested-topology \
+  --rollouts 8 \
+  --wait
+```
+
+Passing argument validation proves only that GPU counts, Qwen3-8B sharding,
+and manifest relationships are coherent. A new training topology is supported
+only after both `native` and `consistency` pass the runtime validator on the
+target hardware.
 
 ## Prepare once
 
@@ -117,6 +161,48 @@ The validator checks the topology, operator readbacks, CUDA Graph settings,
 fallback markers, step count, and train–rollout log-probability evidence. A
 passing sealed run contains `COMPLETE`.
 
+## ROCm MI300X and gfx942
+
+ROCm uses a separate launcher because its strict path requires AITER/CK, RCCL,
+HIP Graph settings, and ROCm-specific runtime evidence. Activate a ROCm VIME
+environment, install this checkout with `pip install -e .`, and stop any
+existing Ray cluster; the ROCm launcher owns a fresh cluster for each arm.
+
+Run the no-rollout-logprob-reuse pair with unique append-only directories:
+
+```bash
+python -m examples.vime_rocm_attention_ablation.run_qwen3_8b \
+  --mode native \
+  --num-rollout 8 \
+  --run-dir "$RLK_REPRO_WORKSPACE/data/runs/rocm-native-8" \
+  --rl-kernel-root "$PWD" \
+  --vime-root "$RLK_REPRO_WORKSPACE/vime" \
+  --megatron-root "$RLK_REPRO_WORKSPACE/Megatron-LM" \
+  --model-root "$RLK_REPRO_MODEL_ROOT" \
+  --reference-checkpoint "$RLK_REPRO_WORKSPACE/checkpoints/Qwen3-8B_torch_dist" \
+  --prompt-data "$RLK_REPRO_WORKSPACE/data/datasets/dapo-math-17k.vime.jsonl"
+
+python -m examples.vime_rocm_attention_ablation.run_qwen3_8b \
+  --mode consistency \
+  --num-rollout 8 \
+  --run-dir "$RLK_REPRO_WORKSPACE/data/runs/rocm-consistency-8" \
+  --rl-kernel-root "$PWD" \
+  --vime-root "$RLK_REPRO_WORKSPACE/vime" \
+  --megatron-root "$RLK_REPRO_WORKSPACE/Megatron-LM" \
+  --model-root "$RLK_REPRO_MODEL_ROOT" \
+  --reference-checkpoint "$RLK_REPRO_WORKSPACE/checkpoints/Qwen3-8B_torch_dist" \
+  --prompt-data "$RLK_REPRO_WORKSPACE/data/datasets/dapo-math-17k.vime.jsonl"
+```
+
+Both commands recompute training logp. Neither sets
+`RLK_ABLATION_USE_ROLLOUT_LOGPROBS` or passes `--use-rollout-logprobs`.
+The runner validates readbacks and mismatch artifacts before returning success.
+
+The ROCm command accepts `--tp-size`, `--cp-size`, `--rollout-tp-size`,
+`--num-gpus`, and `--visible-gpus`. Any topology other than the evidenced
+8-GPU TP4/CP2/rollout-TP4 layout requires `--allow-untested-topology` and
+should begin with an eight-step pair.
+
 ## Configuration without script edits
 
 Use the following order of precedence:
@@ -133,10 +219,11 @@ submission.
 
 Only change Python or shell runners when changing experiment semantics that the
 profile cannot express, such as GPU topology, model architecture, operator
-routing rules, validation gates, or Ray runtime construction. Such changes
-must update the profile, manifest schema or validator when applicable, and the
-launcher tests. Host paths, model locations, output directories, and Ray API
-addresses are not reasons to edit a script.
+routing rules, validation gates, or Ray runtime construction. Supported
+topology sizes are now CLI options and do not require script edits. Other such
+changes must update the profile, manifest schema or validator when applicable,
+and the launcher tests. Host paths, model locations, output directories, and
+Ray API addresses are not reasons to edit a script.
 
 ## Common failure modes
 

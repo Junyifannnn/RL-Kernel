@@ -402,6 +402,26 @@ def _arm_config(profile: dict[str, Any], arm: str) -> dict[str, Any]:
     return config
 
 
+def _validate_topology_args(args: argparse.Namespace) -> None:
+    tp_size = int(args.tp_size)
+    cp_size = int(args.cp_size)
+    rollout_tp_size = int(args.rollout_tp_size)
+    rollout_cp_size = int(args.rollout_cp_size)
+    if min(tp_size, cp_size, rollout_tp_size, rollout_cp_size) <= 0:
+        raise ReproError("TP/CP sizes must be positive")
+    if tp_size * cp_size != 8:
+        raise ReproError("colocated Qwen3-8B training requires --tp-size * --cp-size = 8")
+    if any(size % tp_size for size in (32, 8, 152064)):
+        raise ReproError("--tp-size must divide Qwen3-8B heads, query groups, and vocabulary")
+    if 8 % (rollout_tp_size * rollout_cp_size):
+        raise ReproError("--rollout-tp-size * --rollout-cp-size must divide 8 GPUs")
+    if (tp_size, cp_size) != (4, 2) and not args.allow_untested_topology:
+        raise ReproError(
+            "only TP4/CP2 has end-to-end evidence; add --allow-untested-topology "
+            "for an experimental short run"
+        )
+
+
 def _example_root(rl_kernel_root: Path | None = None) -> Path:
     root = (rl_kernel_root or _repo_root()) / EXAMPLE_RELATIVE
     if not root.is_dir():
@@ -425,6 +445,7 @@ def _example_root_for_run(run_dir: Path) -> Path:
 def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namespace) -> list[str]:
     arm = canonical_arm(args.arm)
     _arm_config(profile, arm)
+    _validate_topology_args(args)
     # The launcher and runner are one interface and must come from the same
     # checkout.  The target RL-Kernel checkout may intentionally be pinned to
     # an older runtime revision whose runner predates the current CLI modes.
@@ -440,6 +461,14 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         str(args.seed),
         "--rollout-seed",
         str(args.rollout_seed),
+        "--tp-size",
+        str(args.tp_size),
+        "--cp-size",
+        str(args.cp_size),
+        "--rollout-tp-size",
+        str(args.rollout_tp_size),
+        "--rollout-cp-size",
+        str(args.rollout_cp_size),
         "--output-root",
         str(paths.output_root),
         "--rl-kernel-root",
@@ -475,6 +504,8 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         command.append("--allow-dirty")
     if args.dry_run:
         command.append("--dry-run")
+    if args.allow_untested_topology:
+        command.append("--allow-untested-topology")
     for item in profile.get("runner_args", []):
         command.extend([str(part) for part in item])
     return command
@@ -695,6 +726,15 @@ def build_parser() -> argparse.ArgumentParser:
         )
         command_parser.add_argument("--seed", type=int, default=1234)
         command_parser.add_argument("--rollout-seed", type=int, default=1234)
+        command_parser.add_argument("--tp-size", type=int, default=4)
+        command_parser.add_argument("--cp-size", type=int, default=2)
+        command_parser.add_argument("--rollout-tp-size", type=int, default=4)
+        command_parser.add_argument("--rollout-cp-size", type=int, default=1)
+        command_parser.add_argument(
+            "--allow-untested-topology",
+            action="store_true",
+            help="allow a non-TP4/CP2 actor topology for an experimental short run",
+        )
         command_parser.add_argument("--run-id", default=None)
         command_parser.add_argument(
             "--wait",
