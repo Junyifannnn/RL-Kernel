@@ -124,11 +124,6 @@ def parse_args(argv=None):
     parser.add_argument("--tp-size", type=int, default=4)
     parser.add_argument("--cp-size", type=int, default=2)
     parser.add_argument("--rollout-tp-size", type=int, default=4)
-    parser.add_argument(
-        "--allow-untested-topology",
-        action="store_true",
-        help="allow a non-TP4/CP2/rollout-TP4 topology for an experimental short run",
-    )
     parser.add_argument("--fixed-paged-tile", default="128")
     parser.add_argument("--paged-kv-max-tokens", default="8192")
     parser.add_argument("--vllm-gpu-memory-utilization", default="0.38")
@@ -137,12 +132,6 @@ def parse_args(argv=None):
     args = parser.parse_args(argv)
     args.case = args.case or {"native": "P/P", "consistency": "R/R"}[args.mode]
     args.mode = args.mode or {"P/P": "native", "R/R": "consistency"}[args.case]
-    requested_topology = (args.num_gpus, args.tp_size, args.cp_size, args.rollout_tp_size)
-    if requested_topology != (8, 4, 2, 4) and not args.allow_untested_topology:
-        parser.error(
-            "only 8-GPU TP4/CP2 with rollout TP4 has end-to-end evidence; "
-            "add --allow-untested-topology for an experimental short run"
-        )
     return args
 
 

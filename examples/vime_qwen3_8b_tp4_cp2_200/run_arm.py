@@ -81,7 +81,6 @@ def _rollout_topology(
     *,
     tensor_parallel_size: int = 4,
     context_parallel_size: int = 2,
-    allow_untested_topology: bool = False,
 ) -> dict[str, int | bool | str]:
     if tensor_parallel_size <= 0:
         raise ValueError("--tp-size must be positive")
@@ -101,11 +100,6 @@ def _rollout_topology(
     for size, label in ((32, "attention heads"), (8, "query groups"), (152064, "vocabulary")):
         if size % tensor_parallel_size:
             raise ValueError(f"--tp-size must divide Qwen3-8B {label} ({size})")
-    if (tensor_parallel_size, context_parallel_size) != (4, 2) and not allow_untested_topology:
-        raise ValueError(
-            "only TP4/CP2 has end-to-end evidence; pass --allow-untested-topology "
-            "for an experimental short run"
-        )
     gpus_per_engine = rollout_tp_size * rollout_cp_size
     if rollout_gpus % gpus_per_engine:
         raise ValueError(
@@ -126,7 +120,6 @@ def _rollout_topology(
         rollout_cp_size,
     ) == (4, 2, 4, 1)
     topology["evidence_level"] = "reference" if is_reference else "experimental"
-    topology["experimental_acknowledged"] = bool(allow_untested_topology)
     return topology
 
 
@@ -357,11 +350,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "--allow-untested-topology",
-        action="store_true",
-        help="allow a non-TP4/CP2 actor topology for an experimental short run",
-    )
-    parser.add_argument(
         "--use-kl-loss",
         action="store_true",
         help="Load the reference checkpoint and add a KL term to the policy loss.",
@@ -422,7 +410,6 @@ def main(argv: list[str] | None = None) -> int:
         args.rollout_cp_size,
         tensor_parallel_size=args.tp_size,
         context_parallel_size=args.cp_size,
-        allow_untested_topology=args.allow_untested_topology,
     )
 
     script_dir = Path(__file__).resolve().parent

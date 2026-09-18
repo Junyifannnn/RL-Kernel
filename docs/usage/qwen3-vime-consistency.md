@@ -29,7 +29,8 @@ environment.
 ## Topology support and evidence
 
 Topology validity and end-to-end evidence are different things. The launcher
-fails closed unless an unproven training topology is explicitly acknowledged.
+accepts any topology that passes its GPU-count and Qwen3-8B sharding checks,
+while the table below records how much runtime evidence each layout has.
 
 | Backend | Training topology | Rollout topology | Status |
 |---|---|---|---|
@@ -49,8 +50,7 @@ rlk-repro plan \
   --rollout-cp-size 2
 ```
 
-Non-TP4/CP2 training layouts additionally require
-`--allow-untested-topology`. For example, an eight-step TP8/CP1 probe is:
+For example, an eight-step TP8/CP1 probe is:
 
 ```bash
 rlk-repro run \
@@ -60,7 +60,6 @@ rlk-repro run \
   --cp-size 1 \
   --rollout-tp-size 8 \
   --rollout-cp-size 1 \
-  --allow-untested-topology \
   --rollouts 8 \
   --wait
 ```
@@ -200,8 +199,7 @@ The runner validates readbacks and mismatch artifacts before returning success.
 
 The ROCm command accepts `--tp-size`, `--cp-size`, `--rollout-tp-size`,
 `--num-gpus`, and `--visible-gpus`. Any topology other than the evidenced
-8-GPU TP4/CP2/rollout-TP4 layout requires `--allow-untested-topology` and
-should begin with an eight-step pair.
+8-GPU TP4/CP2/rollout-TP4 layout should begin with an eight-step pair.
 
 ## Configuration without script edits
 

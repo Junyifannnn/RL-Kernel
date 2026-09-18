@@ -98,7 +98,7 @@ def test_rocm_user_modes_do_not_enable_rollout_logprob_reuse(tmp_path):
     assert config.frozen_parameters()["framework_consistency"]["use_rollout_logprobs"] is False
 
 
-def test_rocm_non_reference_topology_requires_explicit_opt_in(tmp_path):
+def test_rocm_non_reference_topology_needs_no_opt_in_flag(tmp_path):
     base = [
         "--mode",
         "consistency",
@@ -111,9 +111,7 @@ def test_rocm_non_reference_topology_requires_explicit_opt_in(tmp_path):
         "--rollout-tp-size",
         "8",
     ]
-    with pytest.raises(SystemExit):
-        parse_workload_args(base)
-    args = parse_workload_args([*base, "--allow-untested-topology"])
+    args = parse_workload_args(base)
     assert (args.tp_size, args.cp_size, args.rollout_tp_size) == (8, 1, 8)
 
 

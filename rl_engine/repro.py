@@ -415,11 +415,6 @@ def _validate_topology_args(args: argparse.Namespace) -> None:
         raise ReproError("--tp-size must divide Qwen3-8B heads, query groups, and vocabulary")
     if 8 % (rollout_tp_size * rollout_cp_size):
         raise ReproError("--rollout-tp-size * --rollout-cp-size must divide 8 GPUs")
-    if (tp_size, cp_size) != (4, 2) and not args.allow_untested_topology:
-        raise ReproError(
-            "only TP4/CP2 has end-to-end evidence; add --allow-untested-topology "
-            "for an experimental short run"
-        )
 
 
 def _example_root(rl_kernel_root: Path | None = None) -> Path:
@@ -504,8 +499,6 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         command.append("--allow-dirty")
     if args.dry_run:
         command.append("--dry-run")
-    if args.allow_untested_topology:
-        command.append("--allow-untested-topology")
     for item in profile.get("runner_args", []):
         command.extend([str(part) for part in item])
     return command
@@ -730,11 +723,6 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--cp-size", type=int, default=2)
         command_parser.add_argument("--rollout-tp-size", type=int, default=4)
         command_parser.add_argument("--rollout-cp-size", type=int, default=1)
-        command_parser.add_argument(
-            "--allow-untested-topology",
-            action="store_true",
-            help="allow a non-TP4/CP2 actor topology for an experimental short run",
-        )
         command_parser.add_argument("--run-id", default=None)
         command_parser.add_argument(
             "--wait",

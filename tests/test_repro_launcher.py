@@ -5,8 +5,6 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import rl_engine.repro as repro
 
 from rl_engine.repro import (
@@ -94,7 +92,7 @@ def test_launcher_defaults_to_active_checkout_and_runtime(tmp_path: Path):
     assert len(extra_paths) == len(set(extra_paths))
 
 
-def test_non_reference_actor_topology_requires_explicit_opt_in(tmp_path: Path):
+def test_non_reference_actor_topology_runs_without_an_opt_in_flag(tmp_path: Path):
     profile = _profile()
     base = [
         "plan",
@@ -111,13 +109,9 @@ def test_non_reference_actor_topology_requires_explicit_opt_in(tmp_path: Path):
     ]
     args = build_parser().parse_args(base)
     paths = _resolved_paths(profile, args)
-    with pytest.raises(repro.ReproError, match="only TP4/CP2"):
-        _runner_command(paths, profile, args)
-
-    opted_in = build_parser().parse_args([*base, "--allow-untested-topology"])
-    command = _runner_command(_resolved_paths(profile, opted_in), profile, opted_in)
-    assert "--allow-untested-topology" in command
+    command = _runner_command(paths, profile, args)
     assert command[command.index("--tp-size") + 1] == "8"
+    assert command[command.index("--cp-size") + 1] == "1"
 
 
 def test_doctor_enforces_frozen_runtime_and_ray(tmp_path: Path, monkeypatch):

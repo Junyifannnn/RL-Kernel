@@ -19,8 +19,7 @@ reuses rollout log-probabilities. See the
 hardware, runtime setup, Ray configuration, and profile customization.
 
 CUDA `plan` and `run` accept `--tp-size`, `--cp-size`,
-`--rollout-tp-size`, and `--rollout-cp-size`. Non-TP4/CP2 training layouts
-require `--allow-untested-topology`. ROCm uses the separate
+`--rollout-tp-size`, and `--rollout-cp-size`. ROCm uses the separate
 `examples.vime_rocm_attention_ablation.run_qwen3_8b` module documented
 in the guide because it owns ROCm-specific Ray, AITER/CK, RCCL, and HIP Graph
 setup.
