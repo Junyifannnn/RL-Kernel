@@ -220,6 +220,21 @@ def _is_identity_temperature(value: Any) -> bool:
     return value is None or (not isinstance(value, torch.Tensor) and float(value) == 1.0)
 
 
+def _local_logits_temperature(request: Any) -> Any:
+    """Return scaling still required by the Vime local-logits contract.
+
+    Older Vime revisions scale ``request.logits`` before provider dispatch and
+    advertise that fact with ``logits_are_temperature_scaled``.  Current Vime
+    revisions dispatch unscaled logits and leave the marker absent.  Only the
+    reused-local-logits path consumes this distinction; recomputation from
+    hidden states always starts from unscaled values.
+    """
+
+    if _metadata(request).get("logits_are_temperature_scaled") is True:
+        return None
+    return getattr(request, "temperature", None)
+
+
 @torch.no_grad()
 def _metric_entropy_from_strict_lse(
     local_logits: torch.Tensor,
@@ -268,8 +283,6 @@ def _provider_impl(request: Any, *, linear_logp: Any = None) -> LinearLogpResult
     partition = getattr(context, "vocab_partition", None)
     if strict and not isinstance(hidden, torch.Tensor):
         raise RuntimeError("strict Vime linear_logp request is missing structural context")
-    if strict and getattr(request, "log_prob_keep_mask", None) is not None:
-        raise RuntimeError("strict Vime linear_logp does not support top-p replay in this contract")
     if linear_logp is None and strict and isinstance(hidden, torch.Tensor):
         linear_logp = _default_strict_linear_logp()
     if linear_logp is not None and isinstance(hidden, torch.Tensor):
@@ -290,20 +303,28 @@ def _provider_impl(request: Any, *, linear_logp: Any = None) -> LinearLogpResult
             and isinstance(request_logits, torch.Tensor)
             and request_logits.ndim == 2
             and request_logits.dtype in (torch.bfloat16, torch.float16, torch.float32)
-            and request_logits.shape == (
+            and request_logits.shape
+            == (
                 hidden.size(0),
                 projection.weight.size(0),
             )
         )
         if materialized_local_logits:
             reuse_local_logits = True
+        keep_mask = getattr(request, "log_prob_keep_mask", None)
+        if keep_mask is not None and not reuse_local_logits:
+            raise RuntimeError(
+                "strict top-p replay requires reusable materialized local logits"
+            )
         with_entropy = bool(getattr(request, "with_entropy", False))
         with_entropy_grad = bool(getattr(request, "with_entropy_grad", False))
+        local_logits_temperature = _local_logits_temperature(request)
         fast_metric_entropy = (
             reuse_local_logits
             and with_entropy
             and not with_entropy_grad
-            and _is_identity_temperature(getattr(request, "temperature", None))
+            and _is_identity_temperature(local_logits_temperature)
+            and keep_mask is None
         )
         strict_lse = None
         if reuse_local_logits:
@@ -312,6 +333,10 @@ def _provider_impl(request: Any, *, linear_logp: Any = None) -> LinearLogpResult
                 local_logits = request_logits
             if not isinstance(local_logits, torch.Tensor):
                 raise RuntimeError("strict reusable LM-head context is missing local logits")
+            if keep_mask is not None:
+                if keep_mask.shape != local_logits.shape:
+                    raise RuntimeError("strict top-p replay mask must match local logits")
+                local_logits = local_logits.masked_fill(~keep_mask, float("-inf"))
             from_local_logits = getattr(linear_logp, "from_local_logits", None)
             if not callable(from_local_logits):
                 raise RuntimeError(
@@ -325,7 +350,7 @@ def _provider_impl(request: Any, *, linear_logp: Any = None) -> LinearLogpResult
                 global_vocab_size=int(partition.padded_size),
                 real_vocab_size=int(partition.real_size),
                 target="training",
-                temperature=getattr(request, "temperature", None),
+                temperature=local_logits_temperature,
                 return_lse=fast_metric_entropy,
                 diagnostics_hidden=hidden,
                 diagnostics_lm_head_weight=projection.weight,
