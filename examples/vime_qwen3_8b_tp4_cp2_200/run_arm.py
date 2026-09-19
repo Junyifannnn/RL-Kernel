@@ -349,6 +349,8 @@ def build_parser() -> argparse.ArgumentParser:
             "router engine count."
         ),
     )
+    parser.add_argument("--rollout-temperature", type=float, default=1.0)
+    parser.add_argument("--rollout-top-p", type=float, default=1.0)
     parser.add_argument(
         "--use-kl-loss",
         action="store_true",
@@ -392,6 +394,10 @@ def main(argv: list[str] | None = None) -> int:
     args.group = LEGACY_GROUP_ALIASES.get(args.group, args.group)
     if args.num_rollout <= 0:
         raise ValueError("--num-rollout must be positive")
+    if args.rollout_temperature <= 0.0:
+        raise ValueError("--rollout-temperature must be positive")
+    if not 0.0 < args.rollout_top_p <= 1.0:
+        raise ValueError("--rollout-top-p must be in (0, 1]")
     trajectories_per_rollout = args.rollout_batch_size * args.n_samples_per_prompt
     if args.global_batch_size != trajectories_per_rollout:
         raise ValueError(
@@ -497,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
         "RL_KERNEL_MISMATCH_SIDECAR_DIR": str(run_dir / "mismatch-sidecars"),
         "RL_KERNEL_VLLM_REAL_VOCAB_SIZE": "151936",
         "RL_KERNEL_VLLM_PADDED_VOCAB_SIZE": "152064",
-        "RL_KERNEL_VLLM_TEMPERATURE": "1.0",
+        "RL_KERNEL_VLLM_TEMPERATURE": str(args.rollout_temperature),
         "RL_KERNEL_VLLM_CUDAGRAPH_MAX_CAPTURE_SIZE": str(max_engine_decode_batch),
         "RL_KERNEL_SEED": str(args.seed),
         "RL_KERNEL_ROLLOUT_SEED": str(args.rollout_seed),
@@ -548,9 +554,9 @@ def main(argv: list[str] | None = None) -> int:
         "--rollout-max-response-len",
         str(args.max_response_len),
         "--rollout-temperature",
-        "1.0",
+        str(args.rollout_temperature),
         "--rollout-top-p",
-        "1.0",
+        str(args.rollout_top_p),
         "--global-batch-size",
         str(args.global_batch_size),
         "--balance-data",
@@ -659,6 +665,10 @@ def main(argv: list[str] | None = None) -> int:
             "global_batch_size": args.global_batch_size,
             "max_response_len": args.max_response_len,
             "max_tokens_per_gpu": args.max_tokens_per_gpu,
+        },
+        "sampling": {
+            "temperature": args.rollout_temperature,
+            "top_p": args.rollout_top_p,
         },
         "algorithm": {
             "advantage_estimator": "grpo",

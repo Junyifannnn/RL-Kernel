@@ -156,6 +156,30 @@ def test_explicit_vllm_memory_fraction_overrides_profile(tmp_path: Path):
     assert command[index + 1] == "0.31"
 
 
+def test_sampling_parameters_are_forwarded(tmp_path: Path):
+    profile = _profile()
+    args = build_parser().parse_args(
+        [
+            "plan",
+            "--workspace",
+            str(tmp_path),
+            "--mode",
+            "consistency",
+            "--rollout-temperature",
+            "0.7",
+            "--rollout-top-p",
+            "0.95",
+        ]
+    )
+    paths = _resolved_paths(profile, args)
+    command = _runner_command(paths, profile, args)
+
+    temperature_index = len(command) - 1 - command[::-1].index("--rollout-temperature")
+    top_p_index = len(command) - 1 - command[::-1].index("--rollout-top-p")
+    assert command[temperature_index + 1] == "0.7"
+    assert command[top_p_index + 1] == "0.95"
+
+
 def test_doctor_enforces_frozen_runtime_and_ray(tmp_path: Path, monkeypatch):
     directories = {
         name: tmp_path / name

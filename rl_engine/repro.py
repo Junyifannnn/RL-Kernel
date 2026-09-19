@@ -500,6 +500,10 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         [
             "--vllm-gpu-memory-utilization",
             str(vllm_gpu_memory_utilization),
+            "--rollout-temperature",
+            str(args.rollout_temperature),
+            "--rollout-top-p",
+            str(args.rollout_top_p),
         ]
     )
     if args.ray_address:
@@ -734,6 +738,8 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--cp-size", type=int, default=2)
         command_parser.add_argument("--rollout-tp-size", type=int, default=4)
         command_parser.add_argument("--rollout-cp-size", type=int, default=1)
+        command_parser.add_argument("--rollout-temperature", type=float, default=1.0)
+        command_parser.add_argument("--rollout-top-p", type=float, default=1.0)
         command_parser.add_argument(
             "--vllm-gpu-memory-utilization",
             type=float,
