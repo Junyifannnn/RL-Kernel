@@ -288,6 +288,8 @@ Activate the existing ROCm environment and select the machine profile once.
 The supplied profile describes the isolated MI300X experiment checkouts; copy
 it and edit `paths` for another installation. All four companion checkouts
 (RL-Kernel, VIME, Megatron and vLLM) must include the ROCm integration patches.
+The [companion patch bundle](../../examples/vime_rocm_attention_ablation/companion_patches/README.md)
+records exact bases, patch hashes and validation scope.
 
 ```bash
 cd /workspace/rocm-unified-20260919/rl-kernel
