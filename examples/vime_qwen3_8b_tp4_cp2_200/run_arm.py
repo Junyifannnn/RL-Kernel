@@ -490,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
         args.router_policy,
         int(topology["rollout_engines"]),
     )
-    canonical_tp = max(int(topology["tp"]), int(topology["rollout_tp"]))
+    canonical_tp = int(TOPOLOGY["gpus"])
     vocab_alignment = 128 * canonical_tp
     canonical_vocab_size = ((152064 + vocab_alignment - 1) // vocab_alignment) * vocab_alignment
     env_vars = {
@@ -513,16 +513,15 @@ def main(argv: list[str] | None = None) -> int:
         "RL_KERNEL_ATTENTION_CASE": arm.attention_case,
         "RL_KERNEL_FFN_CASE": arm.ffn_case,
         "RL_KERNEL_LOGP_CASE": arm.logp_case,
-        # Use the finer of training and rollout TP as the shared virtual vocab
-        # partition. The TP4/CP2 reference remains canonical TP4 and therefore
-        # keeps its original one-summary-per-rank hot path.
+        # A fixed virtual TP/vocabulary layout keeps reduction boundaries
+        # unchanged when physical training or rollout parallelism changes.
         "RL_KERNEL_STRICT_CANONICAL_TP": str(canonical_tp),
         "RL_KERNEL_STRICT_CANONICAL_VOCAB_SIZE": str(canonical_vocab_size),
         "RL_KERNEL_READBACK_DIR": str(run_dir / "readbacks"),
         "RL_KERNEL_MISMATCH_SIDECAR_DIR": str(run_dir / "mismatch-sidecars"),
         "RL_KERNEL_WEIGHT_AUDIT_DIR": str(run_dir / "weight-audit"),
         "RL_KERNEL_VLLM_REAL_VOCAB_SIZE": "151936",
-        "RL_KERNEL_VLLM_PADDED_VOCAB_SIZE": "152064",
+        "RL_KERNEL_VLLM_PADDED_VOCAB_SIZE": str(canonical_vocab_size),
         "RL_KERNEL_VLLM_TEMPERATURE": str(args.rollout_temperature),
         "RL_KERNEL_VLLM_CUDAGRAPH_MAX_CAPTURE_SIZE": str(max_engine_decode_batch),
         "RL_KERNEL_SEED": str(args.seed),
@@ -593,6 +592,8 @@ def main(argv: list[str] | None = None) -> int:
         "--balance-data",
         "--tensor-model-parallel-size",
         str(topology["tp"]),
+        "--make-vocab-size-divisible-by",
+        str(128 * canonical_tp // int(topology["tp"])),
         "--context-parallel-size",
         str(topology["cp"]),
         "--cp-comm-type",

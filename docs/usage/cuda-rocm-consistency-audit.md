@@ -11,7 +11,10 @@ the merge and must not be presented as a GPU validation of the merged revision.
 Subsequent GPU work is recorded separately in the
 [H100 CP backward follow-up](h100-cp-gradient-validation.md): the original
 TP2/CP4 versus TP4/CP2 pair now has zero observed update/norm differences,
-while the actual rollout CP2 launch failed at backend initialization.
+and the [subsequent rollout CP2 implementation](h100-pcp-validation.md) now
+passes two updates with zero token/norm/parameter differences against CP1.
+The later [H100 topology matrix](h100-matrix-validation.md) records full-model
+CP2/4/8 coverage, the CP8 gradient fix and measured costs.
 
 ## Common command
 
@@ -27,7 +30,8 @@ Use `./rlk plan` with the same arguments to inspect the expanded command. On the
 single eight-GPU Qwen3-8B profile, omitted CP is `8 / TP`. Changing `--tp` alone
 overrides any stale profile CP; explicit `--cp` still wins. Training TP can be
 1/2/4/8, and rollout TP is independently 1/2/4/8. Training PP is 1; rollout CP
-must be 1. A syntactically valid configuration is not a memory or runtime guarantee.
+was 1 in this original audit; the later H100 matrix adds measured CP2/4/8
+support. A syntactically valid configuration is not a memory or runtime guarantee.
 
 The installed `rlk-repro`, checkout `bin/rlk-repro`, and module entry use the same
 parser; `./rlk` additionally selects the profile's Python. Common options include
@@ -49,7 +53,7 @@ Ray setup and framework versions remain different.
 | Mixed per-request temperatures | Rollout adapter handles row values; full-model tests use one value per run | Strict scoring uses the configured run temperature; heterogeneous requests not certified |
 | Training TP/CP | `(1,8),(2,4),(4,2),(8,1)` | Same factorizations |
 | Independent rollout TP | 1/2/4/8 | 1/2/4/8 |
-| Rollout CP > 1 | Actual TP4/CP2 launch failed: `RlKernelAttentionImpl does not support PCP` on vLLM 0.16.0 | Parameter forwarding only; actual PCP implementation and validation remain missing |
+| Rollout CP > 1 | See the subsequent H100 full-model topology matrix; shared-IPC PCP and CP2/4/8 attention checks are covered | Shared adapter is present, but ROCm PCP compatibility and GPU validation remain unverified |
 | `verify` with real weight-update acceptance | Supported, two steps by default | Not implemented; explicit error |
 | `run` and `plan` | Shared interface | Shared interface |
 | `--detach`, `--allow-dirty`, standalone prepare/doctor/validate/report | CUDA path | Not shared; explicit errors for unsupported options/commands |
@@ -87,7 +91,8 @@ into the training score; ROCm replays support membership, then recomputes scores
    On H100, TP2/CP4 and TP4/CP2 had the same initial audited weights, tokens,
    masks and rewards, but gradient norms differed by 0.021213% and the first
    updated audited weight hashes differed. The follow-up fixes and verifies
-   this pair over two updates, comparing every exported parameter. It does not
+   this pair over two updates, comparing every exported parameter. The subsequent
+   H100 topology matrix expands that coverage. It does not
    certify all topologies, microbatch packings or sampling parameters. ROCm has
    no corresponding optimizer trajectory proof for this change.
 2. No exhaustive Cartesian topology × temperature × top-p matrix and no new

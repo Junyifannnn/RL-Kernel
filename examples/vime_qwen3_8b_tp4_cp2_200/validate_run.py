@@ -73,7 +73,7 @@ def _validate_topology(value: Any) -> list[str]:
     rollout_gpus_per_engine = value.get("rollout_gpus_per_engine")
     rollout_cp = value.get("rollout_cp", 1)
     rollout_tp = value.get("rollout_tp", rollout_gpus_per_engine)
-    expected_offload = tensor_parallel == 1 and rollout_tp == 1 and rollout_cp == 1
+    expected_offload = tensor_parallel == 1 and rollout_tp == 1
     if not isinstance(value.get("offload_train"), bool) or value["offload_train"] != expected_offload:
         errors.append(
             f"manifest topology offload_train={value.get('offload_train')!r}, "
@@ -196,6 +196,41 @@ def _load_readbacks(directory: Path) -> list[dict[str, Any]]:
     if not values:
         raise ValueError(f"no framework readbacks found in {directory}")
     return values
+
+
+def _validate_pcp_readbacks(readbacks, topology, arm):
+    cp = int(topology.get("rollout_cp", 1))
+    if cp == 1 or _side(str(arm[CASE_FIELDS["attention"]]), "rollout") != "rl_kernel":
+        return {"passed": True, "required": False, "errors": []}
+    tp = int(topology["rollout_tp"])
+    expected_per_rank = tp * int(topology["rollout_engines"])
+    counts = [0] * cp
+    errors = []
+    for value in readbacks:
+        if value.get("framework") != "vllm" or value.get("target") != "rollout":
+            continue
+        record = value.get("operators", {}).get("attention", {})
+        if not int(record.get("call_count", 0)):
+            continue
+        execution = record.get("provenance", {}).get("execution", {})
+        rank = execution.get("cp_rank")
+        required = {
+            "cp_world_size": cp, "tp_world_size": tp,
+            "kv_storage": "token_sharded",
+            "attention_queries": "disjoint_cp_partitions",
+            "attention_merge": "rank_ordered_output_gather_no_reduction",
+            "fallback": False,
+        }
+        if any(execution.get(key) != expected for key, expected in required.items()):
+            errors.append(f"PCP runtime layout differs from manifest in {value.get('_path')}")
+        elif not isinstance(rank, int) or not 0 <= rank < cp:
+            errors.append("PCP runtime has an invalid rank")
+        else:
+            counts[rank] += 1
+    if any(count < expected_per_rank for count in counts):
+        errors.append(f"PCP rank coverage {counts}, expected at least {expected_per_rank} each")
+    return {"passed": not errors, "required": True, "errors": errors,
+            "cp_rank_worker_counts": counts, "expected_workers_per_cp_rank": expected_per_rank}
 
 
 def _reported_backend_ids(value: Any) -> set[str]:
@@ -437,7 +472,9 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
     records = _parse_runtime_records(log_text)
     require_zero = all(str(arm[CASE_FIELDS[module]]) == "R/R" for module in MODULES)
     cudagraph = _validate_cudagraph(log_text, manifest)
-    readbacks = _validate_readbacks(_load_readbacks(run_dir / "readbacks"), arm, log_text)
+    raw_readbacks = _load_readbacks(run_dir / "readbacks")
+    readbacks = _validate_readbacks(raw_readbacks, arm, log_text)
+    pcp = _validate_pcp_readbacks(raw_readbacks, manifest["topology"], arm)
     runtime_logprobs = _validate_runtime_logprobs(
         records["step"],
         int(manifest["num_rollout"]),
@@ -566,6 +603,7 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
         "passed": bool(
             cudagraph["passed"]
             and readbacks["passed"]
+            and pcp["passed"]
             and logprobs["passed"]
             and runtime_logprobs["passed"]
             and not global_errors
@@ -573,6 +611,7 @@ def validate_run(run_dir: Path) -> dict[str, Any]:
         "errors": global_errors,
         "cudagraph": cudagraph,
         "runtime_readbacks": readbacks,
+        "pcp_execution": pcp,
         "train_rollout_logprob": logprobs,
         "runtime_scalar_logprob": runtime_logprobs,
         "offline_tensor_comparison": _inspect_offline_dumps(run_dir / "train-data"),

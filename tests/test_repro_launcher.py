@@ -73,6 +73,24 @@ def test_native_command_uses_production_operator_route(tmp_path: Path):
     assert "--use-rollout-logprobs" not in command
 
 
+def test_default_logical_microbatch_budget_is_topology_invariant(tmp_path: Path):
+    for tp in (1, 2, 4, 8):
+        args = _args(tmp_path, "consistency")
+        args.tp_size, args.cp_size = tp, 8 // tp
+        paths = _resolved_paths(_profile(), args)
+        command = _runner_command(paths, _profile(), args)
+        offset = len(command) - 1 - command[::-1].index("--max-tokens-per-gpu")
+        assert int(command[offset + 1]) * args.cp_size == 1024
+
+
+def test_explicit_microbatch_budget_is_preserved(tmp_path: Path):
+    args = _args(tmp_path, "consistency")
+    args.max_tokens_per_gpu = 777
+    command = _runner_command(_resolved_paths(_profile(), args), _profile(), args)
+    offset = len(command) - 1 - command[::-1].index("--max-tokens-per-gpu")
+    assert command[offset + 1] == "777"
+
+
 def test_launcher_defaults_to_active_checkout_and_runtime(tmp_path: Path):
     profile = _profile()
     args = _args(tmp_path, "native")

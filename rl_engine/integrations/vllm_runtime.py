@@ -583,7 +583,9 @@ def _patch_qwen_lm_head_padding() -> None:
         raise RuntimeError(
             f"invalid strict rollout vocab contract: real={real_vocab}, padded={padded_vocab}"
         )
-    padding_size = padded_vocab - real_vocab
+    # vLLM rounds to a multiple, rather than adding this many rows. The
+    # already padded canonical size must remain unchanged for every TP.
+    padding_size = padded_vocab
     original = ParallelLMHead.__init__
     original_weight_loader = VocabParallelEmbedding.weight_loader
     original_tie_weights = getattr(ParallelLMHead, "tie_weights", None)
@@ -705,12 +707,13 @@ def _patch_qwen_compute_logits(integration: VllmIntegration) -> None:
             if lm_head is None or shard_indices is None or not isinstance(weight, torch.Tensor):
                 raise RuntimeError("strict rollout linear_logp requires a real Qwen LM-head shard")
             tp = get_tp_group()
-            tp_world = int(tp.world_size)
             publish_rollout_linear_logp_context(
                 hidden_states,
                 weight,
                 getattr(lm_head, "bias", None),
-                tp_group=tp.device_group if tp_world > 1 else None,
+                # Even TP1 has a real singleton group. None means WORLD to
+                # torch.distributed and would accidentally include PCP ranks.
+                tp_group=tp.device_group,
                 vocab_start_index=int(shard_indices.padded_org_vocab_start_index),
                 global_vocab_size=int(lm_head.num_embeddings_padded),
                 real_vocab_size=int(
@@ -1593,10 +1596,34 @@ def _register_attention_backend(integration: VllmIntegration) -> None:
         integration.install_operator("attention", operator)
 
     class RlKernelAttentionImpl(PlatformAttentionImpl):
+        supports_pcp = operator is not None
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             super().__init__(*args, **kwargs)
             if operator is not None:
                 operator.bind_inference()
+                from vllm.config import get_current_vllm_config
+                config = get_current_vllm_config()
+                requested_cp = int(getattr(config.parallel_config,
+                                           "prefill_context_parallel_size", 1))
+                if requested_cp > 1 and operator._pcp is None:
+                    from vllm.distributed import get_pcp_group, get_dcp_group
+                    pcp = get_pcp_group()
+                    if pcp.world_size != requested_cp:
+                        raise ValueError("strict PCP process group differs from configuration")
+                    if get_dcp_group().world_size != 1:
+                        raise ValueError("strict PCP currently requires decode CP=1")
+                    from rl_engine.integrations.vllm_pcp import PagedContextParallel
+                    operator._pcp = PagedContextParallel(
+                        pcp, config.parallel_config.cp_kv_cache_interleave_size)
+                    block = int(config.cache_config.block_size)
+                    capacity = ((config.model_config.max_model_len + pcp.world_size * block - 1)
+                                // (pcp.world_size * block)) * block
+                    requests = min(config.scheduler_config.max_num_seqs,
+                                   int(os.getenv("RL_KERNEL_VLLM_CUDAGRAPH_MAX_CAPTURE_SIZE",
+                                                 str(config.scheduler_config.max_num_seqs))))
+                    element_size = torch.empty((), dtype=config.model_config.dtype).element_size()
+                    payload = 2 * requests * capacity * int(self.num_kv_heads) * int(self.head_size) * element_size
+                    operator._pcp.bind(payload)
             if torch.version.hip is not None and operator is not None:
                 from vllm.config import get_current_vllm_config_or_none
 
@@ -1732,6 +1759,11 @@ def install_vllm_integration(plan: IntegrationPlan) -> VllmIntegration:
         _install_flash_attn_ops_compatibility()
     strict_linear_logp = plan.implementation_for("logp", "rollout") is Implementation.RL_KERNEL
     strict_attention = plan.implementation_for("attention", "rollout") is Implementation.RL_KERNEL
+    if torch.version.hip is None:
+        from rl_engine.integrations.vllm_memory import patch_weight_pool, prepare_worker_ipc
+        strict_rollout = any(plan.implementation_for(module, "rollout") is Implementation.RL_KERNEL
+                             for module in ("attention", "ffn", "logp"))
+        patch_weight_pool(prepare=prepare_worker_ipc if strict_rollout else None)
     if strict_attention:
         _patch_qwen3_strict_model()
         _patch_rocm_weight_cache_refresh()

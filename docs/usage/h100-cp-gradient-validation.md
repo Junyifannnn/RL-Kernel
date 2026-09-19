@@ -68,10 +68,13 @@ Responses were capped at 512 tokens and all truncated; nonzero gradients came
 from KL=0.01, with zero policy-gradient advantages. This establishes the
 observed pair, not every topology, reward scenario, microbatch packing,
 temperature/top-p combination, or cross-platform identity. In particular,
-the canonical TP is still derived from the finer training/rollout TP, and
-changing CP can change packing when the token budget splits the batch.
+those historical runs derived canonical TP from the finer training/rollout
+TP and could change packing with CP. The subsequent
+[topology matrix](h100-matrix-validation.md) uses fixed virtual TP8 and a
+fixed default logical token budget, and fixes the CP8 ring-average rounding.
+Explicit packing overrides remain a different numerical configuration.
 
-## Rollout CP2: actual failure
+## Historical rollout CP2 failure and resolution
 
 `vime200-rollout-cp2-verify-r1` actually launched training TP4/CP2 and rollout
 TP4/CP2 on eight H100s, with temperature 0.7 and top-p 0.95. vLLM 0.16.0 failed
@@ -81,7 +84,9 @@ before generation with:
 AssertionError: PCP requires attention impls' support, but the impl RlKernelAttentionImpl does not support PCP.
 ```
 
-The CLI forwards prefill CP but the backend does not implement the required
-token/KV partition and attention merge. No rollout CP2 numerical pass was
-obtained. Setting `supports_pcp=True` alone would not implement PCP. ROCm was
-not rerun for this follow-up.
+At that revision only the CLI forwarded prefill CP. The subsequent adapter
+implements the required token-sharded KV layout, query partition and output
+gather using the existing training IPC collectives. `pcp2-ipc-r3` now passes
+two complete updates with identical tokens, norms and all 399 exported
+parameters against CP1. See [the PCP results](h100-pcp-validation.md), including
+the remaining performance cost and validation scope. ROCm was not rerun.

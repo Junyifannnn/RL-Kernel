@@ -71,8 +71,11 @@ environment.
 The [current CUDA/ROCm audit](cuda-rocm-consistency-audit.md) records the common
 short command, exact tested configurations, source dependencies and remaining gaps.
 Both platforms accept training TP/CP `(1,8),(2,4),(4,2),(8,1)` and independent
-rollout TP1/2/4/8, with rollout CP1. The newest CUDA evidence is five two-step
-runs; ROCm has nine one-step cases. Earlier one-round numbers below are historical.
+rollout TP1/2/4/8. The [H100 matrix](h100-matrix-validation.md) records 14
+two-update configurations, including rollout CP2/4/8, with zero selected-logprob,
+token, gradient-norm and exported-parameter differences. ROCm has nine historical
+one-step cases with rollout CP1; ROCm PCP remains unvalidated. These results
+are not an exhaustive topology or sampling matrix.
 
 After configuring `.rlk-profile.json` once, use the same command on either backend:
 
@@ -100,43 +103,42 @@ throughput claim.
 | TP4/CP2 | TP2/CP1 | 1292 | 45.1 | 33.3 s |
 | TP4/CP2 | TP8/CP1 | — | 51.8 | — |
 
-The TP4/CP2 reference retains its original single-shard launches. Coarser
-physical TP uses additional canonical-shard GEMM launches, so equal bitwise
-results do not imply equal throughput. Different rollout TP values also change
-the number of engines and request concurrency.
+These timings predate the fixed canonical TP8 and canonical backward follow-up.
+They are historical measurements, not timings of the current source. Physical
+TP changes the number of canonical-shard GEMM launches; rollout TP/CP also
+changes engine count and request concurrency. See the
+[current H100 validation report](h100-matrix-validation.md) for measured results.
 
 ## Canonical topology strategy
 
-The non-default CUDA work reuses the TP4/CP2 implementation rather than
-maintaining a second operator stack. The launcher records a shared
-`canonical_tp`, currently the finer of training TP and rollout TP. A physical
-rank that owns more than one canonical shard executes those shards separately
-and combines them with the same fixed tree used by the finer topology.
+The CUDA implementation reuses the existing TP4/CP2 operators and IPC
+collectives. On this eight-GPU profile, the launcher fixes virtual
+`canonical_tp=8` and padded vocabulary 152576 for every physical topology.
+A physical TP rank executes its adjacent virtual shards separately and
+combines them in the same fixed order. This prevents a topology change from
+changing vocabulary or GEMM reduction boundaries.
 
-For the validated TP2/CP4 training and TP4/CP1 rollout pair:
+Attention output projection, packed FFN and selected-token logp use the same
+virtual partition. CP changes token ownership; canonical backward restores
+unpadded logical sample/token order before parameter reductions. The loss
+backward seed is normalized before model derivatives. One CP replica
+contributes each complete parameter gradient to the framework's final average,
+avoiding CP8 ring rounding from repeatedly adding identical FP32 values.
+Shared Q/K norm gradients similarly have one TP contributor.
 
-- one TP2 rank owns two adjacent canonical TP4 shards;
-- Attention output projection computes two TP4-width partial projections
-  before the existing deterministic TP reduction;
-- FFN gate, up, and down projections execute at TP4 shard widths, and the down
-  partials are combined in the TP4 fixed-tree order;
-- selected-token logp exposes TP4-sized virtual vocabulary summaries and
-  merges them in ascending global-vocabulary order;
-- CP changes token ownership only. Strict Attention reconstructs global
-  positions before the attention kernel, and CP is not a logp reduction axis.
+Rollout CP uses the same `collective_for_group` / `all_gather_many` IPC
+transport as training TP4/CP2, followed by the existing strict paged attention
+runtime. KV storage is token-sharded; the adapter restores vLLM's interleaved
+pages to logical order, divides queries across CP ranks, and gathers outputs
+without floating-point attention merging. This is not communication-free:
+logical KV pages and query outputs are gathered through the existing transport.
+CUDA Graph capture uses preallocated IPC storage. Full decode graphs currently
+materialize KV to the model context bound, with measurable short-sequence cost.
 
-This keeps the reference TP4/CP2 hot path unchanged: `canonical_tp=4` gives
-exactly one shard per TP4 rank, so it does not add projection launches or a new
-reduction. Coarser TP layouts add launches but retain the existing
-cuBLASLt no-split-K kernels and fixed-tree collectives. Their performance must
-be measured; bitwise success alone is not a throughput claim.
-
-TP1/CP8 uses four TP4 virtual shards per physical training rank. TP8/CP1 or
-rollout TP8 selects canonical TP8; the vLLM QKV projection, output projection,
-packed FFN, and padded-vocabulary logp statistics use the corresponding TP8
-virtual shards while retaining CUDA Graph capture. Rollout CP greater than 1
-is a separate vLLM PCP integration task, not just another value for
-`canonical_tp`.
+See [H100 verification](h100-configurable.md) and the
+[full-model matrix](h100-matrix-validation.md) for the exact measured scope.
+ROCm PCP, PP/EP, multi-node and arbitrary long optimizer trajectories remain
+outside the completed H100 validation.
 
 ## Prepare once
 
@@ -274,14 +276,13 @@ The CUDA-only `verify`, standalone utility commands and `--detach` are not ROCm 
 see the audit for the explicit command differences.
 
 On this eight-GPU Qwen3-8B setup, training `(TP, CP)` can be `(1,8)`, `(2,4)`,
-`(4,2)` or `(8,1)`; rollout TP can be 1, 2, 4 or 8. The finer training/rollout TP
-defines canonical shards. The padded vocabulary remains 152064 for every TP.
-Rollout CP is forwarded as vLLM prefill context parallelism through
-`ParallelConfig.prefill_context_parallel_size`; this does not implement PCP.
-The H100 vLLM 0.16.0 rollout TP4/CP2 test failed because
-`RlKernelAttentionImpl does not support PCP`; ROCm PCP is also unvalidated.
-See the [actual follow-up results](h100-cp-gradient-validation.md).
-Decode remains TP-only. The
+`(4,2)` or `(8,1)`; rollout TP can be 1, 2, 4 or 8. The ROCm route retains
+its existing canonical-partition and padded-vocabulary contract. The CUDA
+follow-up uses fixed virtual TP8 and vocabulary 152576.
+Rollout CP is forwarded through `ParallelConfig.prefill_context_parallel_size`.
+The former H100 PCP initialization failure has been fixed using the shared IPC
+adapter; see the [CUDA PCP results](h100-pcp-validation.md). ROCm PCP remains
+unvalidated. The separate decode-context-parallel setting is 1. The
 per-engine GPU count is rollout TP × rollout CP and must divide the available
 rollout GPUs. PP/EP and sequence parallelism are outside this runner's scope.
 
@@ -329,7 +330,8 @@ Ray API addresses are not reasons to edit a script.
 - **Ray submission cannot connect:** start Ray and, for a non-default dashboard,
   pass `--ray-address http://host:port` to `plan` and `run`.
 - **A source checkout is dirty:** commit or clean it. Use `--allow-dirty` only
-  for disposable development runs; such runs are not publishable evidence.
+  for development runs and retain source fingerprints; label those checks
+  separately from clean-checkout release validation.
 - **A run directory already exists:** choose a new `--run-id`. Run directories
   are append-only and are never overwritten.
 

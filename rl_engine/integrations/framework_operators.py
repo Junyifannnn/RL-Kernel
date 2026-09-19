@@ -783,12 +783,19 @@ class _MegatronCPWeightGradient(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, weight, cp_world):
+        from rl_engine.integrations.canonical_cp import current_layout
         ctx.cp_world = cp_world
+        ctx.cp_layout = current_layout()
         return weight
 
     @staticmethod
     def backward(ctx, grad):
-        return grad / ctx.cp_world, None
+        if ctx.cp_layout is not None:
+            from rl_engine.integrations.canonical_cp import replica_parameter_gradient
+            grad = replica_parameter_gradient(grad, ctx.cp_world, ctx.cp_layout.cp_rank)
+        else:
+            grad = grad / ctx.cp_world
+        return grad, None
 
 
 class MegatronFFNOperator:
@@ -1015,6 +1022,7 @@ class VllmAttentionOperator:
         self._rocm_paged_metadata_value: dict[str, Any] | None = None
         self._rocm_kv_indptr_cache: dict[tuple[Any, ...], torch.Tensor] = {}
         self._phase_provenance: dict[str, dict[str, Any]] = {}
+        self._pcp = None
 
     def bind_inference(self) -> None:
         """Resolve the backend after vLLM has selected the worker CUDA device."""
@@ -1828,6 +1836,21 @@ class VllmAttentionOperator:
         )
         if key_cache.dtype != query.dtype or value_cache.dtype != query.dtype:
             raise RuntimeError("strict vLLM Attention requires an unquantized KV cache")
+        if self._pcp is not None:
+            result = self._pcp.forward(runtime, impl, query, output, attn_metadata,
+                                       key_cache, value_cache, block_table)
+            self._record_phase_provenance("pcp", {
+                "framework_layout": "vllm_pcp_interleaved_kv",
+                "cp_world_size": self._pcp.world,
+                "cp_rank": self._pcp.rank,
+                "tp_world_size": tp_world,
+                "runtime_platform": runtime_platform,
+                "kv_storage": "token_sharded",
+                "attention_queries": "disjoint_cp_partitions",
+                "attention_merge": "rank_ordered_output_gather_no_reduction",
+                "fallback": False,
+            })
+            return result
         if runtime_platform == "rocm":
             direct_output = self._rocm_direct_paged(
                 impl,

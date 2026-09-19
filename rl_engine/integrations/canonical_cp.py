@@ -54,6 +54,8 @@ class CPLayout:
     cp_group: object
     tp_world: int
     tp_group: object
+    cp_rank: int = 0
+    tp_rank: int = 0
 
     def ordered(self, value):
         return value.index_select(0, self.order)
@@ -70,24 +72,53 @@ class CPLayout:
         return tuple(self.ordered(v) for v in values)
 
 
+def replica_parameter_gradient(gradient, replicas, rank):
+    """Contribute a full canonical parameter sum from one replica only.
+
+    The framework still averages CP gradients and sums shared TP gradients.
+    Repeatedly adding identical FP32 values with a ring can round differently
+    for eight replicas. A single nonzero contribution makes those reductions
+    exact without changing activation gradients or the optimizer algorithm.
+    Do not mutate the incoming gradient: autograd may share it with another edge.
+    """
+    if rank != 0:
+        return torch.zeros_like(gradient)
+    return gradient if replicas == 1 else gradient * replicas
+
+
+class CanonicalLossGradient(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, loss, cp_world):
+        ctx.cp_world = cp_world
+        # Megatron rescales this scalar in place after the loss callback.
+        return loss.clone()
+
+    @staticmethod
+    def backward(ctx, gradient):
+        # Remove the framework's CP multiplier before any low-precision
+        # model derivative, including activation gradients and underflow.
+        return gradient / ctx.cp_world, None
+
+
 def weight_gradient(x, dy, layout, chunks=1, column=True):
     from rl_engine.kernels.ops.matmul.det_gemm import det_gemm_linear_weight_gradient
     if layout is not None:
         x, dy = layout.gather_many(x, dy)
-        # Megatron's loss has a CP multiplier and its final CP parameter
-        # reduction averages replicas. Each replica now owns the full sum.
-        dy = dy / layout.cp_world
     if chunks == 1:
-        return det_gemm_linear_weight_gradient(x, dy)
-    source = dy if column else x
-    if source.size(-1) % chunks:
-        raise ValueError('canonical parameter shard does not divide TP')
-    width = source.size(-1) // chunks
-    parts = [det_gemm_linear_weight_gradient(
-        x if column else x.narrow(1, i * width, width).contiguous(),
-        dy.narrow(1, i * width, width).contiguous() if column else dy,
-    ) for i in range(chunks)]
-    return torch.cat(parts, dim=0 if column else 1)
+        result = det_gemm_linear_weight_gradient(x, dy)
+    else:
+        source = dy if column else x
+        if source.size(-1) % chunks:
+            raise ValueError('canonical parameter shard does not divide TP')
+        width = source.size(-1) // chunks
+        parts = [det_gemm_linear_weight_gradient(
+            x if column else x.narrow(1, i * width, width).contiguous(),
+            dy.narrow(1, i * width, width).contiguous() if column else dy,
+        ) for i in range(chunks)]
+        result = torch.cat(parts, dim=0 if column else 1)
+    if layout is not None:
+        result = replica_parameter_gradient(result, layout.cp_world, layout.cp_rank)
+    return result
 
 
 class CPRowLinear(torch.autograd.Function):
@@ -122,21 +153,25 @@ class CPRMSNorm(torch.autograd.Function):
             y = torch.nn.functional.rms_norm(local, (x.size(-1),), weight.detach(), ctx.eps)
             dx, = torch.autograd.grad(y, local, dy)
         full_x, full_dy = ctx.layout.gather_many(x, dy)
-        divisor = ctx.layout.cp_world
         if ctx.sharded_heads and ctx.layout.tp_world > 1:
             # Q/K gamma is shared across heads. Preserve token/head order
-            # before its parameter sum, then cancel Megatron's TP SUM.
+            # before its parameter sum. Only TP0 contributes the complete
+            # gamma gradient to Megatron's subsequent TP SUM.
             gathered = []
             for value in (full_x, full_dy):
                 pieces = [torch.empty_like(value) for _ in range(ctx.layout.tp_world)]
                 torch.distributed.all_gather(pieces, value.contiguous(), group=ctx.layout.tp_group)
                 gathered.append(torch.cat(pieces, dim=-2))
             full_x, full_dy = gathered
-            divisor *= ctx.layout.tp_world
         with torch.enable_grad():
             gamma = weight.detach().requires_grad_(True)
             full_y = torch.nn.functional.rms_norm(full_x, (x.size(-1),), gamma, ctx.eps)
-            dw, = torch.autograd.grad(full_y, gamma, full_dy / divisor)
+            dw, = torch.autograd.grad(full_y, gamma, full_dy)
+        replicas = ctx.layout.cp_world
+        owner = ctx.layout.cp_rank == 0
+        if ctx.sharded_heads:
+            owner = owner and ctx.layout.tp_rank == 0
+        dw = replica_parameter_gradient(dw, replicas, 0 if owner else 1)
         return dx, dw, None, None, None
 
 
@@ -162,9 +197,10 @@ class CPEmbedding(torch.autograd.Function):
         ids, = ctx.saved_tensors
         ids, dy = ctx.layout.gather_many(ids.reshape(-1, 1), dy.reshape(-1, dy.size(-1)))
         dw = _deterministic_embedding_grad_weight(
-            ids.flatten() - ctx.start, dy.float() / ctx.layout.cp_world,
+            ids.flatten() - ctx.start, dy.float(),
             weight_shape=ctx.shape, weight_dtype=ctx.dtype,
         )
+        dw = replica_parameter_gradient(dw, ctx.layout.cp_world, ctx.layout.cp_rank)
         return None, dw, None, None
 
 
@@ -174,11 +210,19 @@ def install():
     from megatron.core.models.gpt.gpt_model import GPTModel
     from megatron.core.tensor_parallel.layers import VocabParallelEmbedding
     from megatron.core.tensor_parallel.mappings import reduce_from_tensor_model_parallel_region
-    from vime.backends.megatron_utils import data, model
+    from vime.backends.megatron_utils import data, model, loss as loss_module
     if getattr(GPTModel, '_rlk_cp_parameter_grads', False):
         return
     from rl_engine.integrations.reproducible_norm import install as install_norm
     install_norm()
+    original_loss = model.loss_function
+    @wraps(original_loss)
+    def loss_function(*args, **kwargs):
+        value, normalizer, metrics = original_loss(*args, **kwargs)
+        return (CanonicalLossGradient.apply(value, mpu.get_context_parallel_world_size()),
+                normalizer, metrics)
+    model.loss_function = loss_function
+    loss_module.loss_function = loss_function
     from megatron.core.tensor_parallel.random import CheckpointFunction
     checkpoint_forward = CheckpointFunction.forward
     @wraps(checkpoint_forward)
@@ -211,6 +255,7 @@ def install():
             torch.tensor(packed_gather_indices(lengths, ids.size(1), cp), device=ids.device),
             ids.size(1), cp, mpu.get_context_parallel_group(),
             mpu.get_tensor_model_parallel_world_size(), mpu.get_tensor_model_parallel_group(),
+            mpu.get_context_parallel_rank(), mpu.get_tensor_model_parallel_rank(),
         )
         token = _ACTIVE.set(layout)
         try:
