@@ -215,12 +215,54 @@ def qwen3_ffn_packed_inference(
 ) -> Tensor:
     """Inference-only packed FFN entry compatible with torch.compile."""
 
-    if tp_world_size <= 1:
-        return _qwen3_ffn_packed_inference(
-            rmsnorm_output,
-            fused_gate_up_weight,
-            down_weight,
+    canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world_size)))
+    if canonical_tp < tp_world_size or canonical_tp % tp_world_size:
+        raise ValueError(
+            f"canonical TP {canonical_tp} must be a positive multiple of "
+            f"rollout TP={tp_world_size}"
         )
+    canonical_chunks = canonical_tp // tp_world_size
+
+    def canonical_local_output() -> Tensor:
+        if canonical_chunks == 1:
+            return _qwen3_ffn_packed_inference(
+                rmsnorm_output,
+                fused_gate_up_weight,
+                down_weight,
+            )
+        if fused_gate_up_weight.size(0) % 2:
+            raise ValueError("fused gate/up weight must contain equal gate and up shards")
+        intermediate = fused_gate_up_weight.size(0) // 2
+        if intermediate % canonical_chunks or down_weight.size(1) != intermediate:
+            raise ValueError("packed FFN weights cannot form canonical TP shards")
+        width = intermediate // canonical_chunks
+        gate_weight, up_weight = fused_gate_up_weight.split(intermediate, dim=0)
+        partials = []
+        for chunk in range(canonical_chunks):
+            start = chunk * width
+            packed_weight = torch.cat(
+                (
+                    gate_weight.narrow(0, start, width),
+                    up_weight.narrow(0, start, width),
+                ),
+                dim=0,
+            ).contiguous()
+            partials.append(
+                _qwen3_ffn_packed_inference(
+                    rmsnorm_output,
+                    packed_weight,
+                    down_weight.narrow(1, start, width).contiguous(),
+                )
+            )
+        while len(partials) > 1:
+            partials = [
+                partials[index] + partials[index + 1]
+                for index in range(0, len(partials), 2)
+            ]
+        return partials[0]
+
+    if tp_world_size <= 1:
+        return canonical_local_output()
     if collective_handle <= 0:
         raise RuntimeError("packed rollout FFN requires a bound TP collective")
     if (
@@ -231,13 +273,9 @@ def qwen3_ffn_packed_inference(
         # Eager ROCm does not reserve graph staging.  Keep its established
         # in-place fixed-tree path; graph-enabled runs register the handle in
         # prepare_packed_inference and stay behind the opaque custom op below.
-        output = _qwen3_ffn_packed_inference(
-            rmsnorm_output,
-            fused_gate_up_weight,
-            down_weight,
-        )
+        output = canonical_local_output()
         return collective.all_reduce(output, out=output)
-    if getattr(torch.version, "hip", None) is not None:
+    if getattr(torch.version, "hip", None) is not None and canonical_chunks == 1:
         return _qwen3_ffn_packed_tp_inference_rocm(
             rmsnorm_output,
             fused_gate_up_weight,
@@ -254,7 +292,7 @@ def qwen3_ffn_packed_inference(
     )
     direct_output = (
         None
-        if not callable(direct_staging)
+        if not callable(direct_staging) or canonical_chunks != 1
         else direct_staging(output_shape_2d, dtype=rmsnorm_output.dtype)
     )
     if direct_output is not None:
@@ -273,11 +311,7 @@ def qwen3_ffn_packed_inference(
             collective_handle=collective_handle,
         )
         return reduced.reshape(*input_shape[:-1], down_weight.shape[0])
-    output = _qwen3_ffn_packed_inference(
-        rmsnorm_output,
-        fused_gate_up_weight,
-        down_weight,
-    )
+    output = canonical_local_output()
     return deterministic_all_reduce_inplace(
         output,
         collective_handle=collective_handle,
@@ -309,6 +343,77 @@ def _linear_fwd(a: Tensor, weight: Tensor, *, disable_split_k: bool) -> Tensor:
     # cuBLASLt / CUTLASS: may use split-K. Detach so Autograd.Function owns backward.
     with torch.no_grad():
         return torch.nn.functional.linear(a, weight)
+
+
+def _canonical_tp_column_projection(
+    input_value: Tensor,
+    weight: Tensor,
+    *,
+    tp_world: int,
+    disable_split_k: bool,
+) -> Tensor:
+    """Run column projections at the validated canonical TP output width."""
+
+    canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world)))
+    if canonical_tp < tp_world or canonical_tp % tp_world:
+        raise ValueError(
+            f"canonical TP {canonical_tp} must be a positive multiple of TP={tp_world}"
+        )
+    chunks = canonical_tp // tp_world
+    if chunks == 1:
+        return _linear_fwd(input_value, weight, disable_split_k=disable_split_k)
+    if weight.size(0) % chunks:
+        raise ValueError(
+            f"column projection rows {weight.size(0)} do not divide into {chunks} chunks"
+        )
+    rows = weight.size(0) // chunks
+    return torch.cat(
+        [
+            _linear_fwd(
+                input_value,
+                weight.narrow(0, chunk * rows, rows).contiguous(),
+                disable_split_k=disable_split_k,
+            )
+            for chunk in range(chunks)
+        ],
+        dim=1,
+    )
+
+
+def _canonical_tp_down_projection(
+    activated: Tensor,
+    down_weight: Tensor,
+    *,
+    tp_world: int,
+    disable_split_k: bool,
+) -> Tensor:
+    """Recreate the canonical TP fixed tree before the physical TP reduce."""
+
+    canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world)))
+    if canonical_tp < tp_world or canonical_tp % tp_world:
+        raise ValueError(
+            f"canonical TP {canonical_tp} must be a positive multiple of TP={tp_world}"
+        )
+    chunks = canonical_tp // tp_world
+    if chunks == 1:
+        return _linear_fwd(activated, down_weight, disable_split_k=disable_split_k)
+    if activated.size(1) % chunks or down_weight.size(1) != activated.size(1):
+        raise ValueError("FFN intermediate shard cannot form canonical TP chunks")
+    width = activated.size(1) // chunks
+    partials = [
+        _linear_fwd(
+            activated.narrow(1, chunk * width, width).contiguous(),
+            down_weight.narrow(1, chunk * width, width).contiguous(),
+            disable_split_k=disable_split_k,
+        )
+        for chunk in range(chunks)
+    ]
+    while len(partials) > 1:
+        partials = [
+            partials[index] + partials[index + 1]
+            for index in range(0, len(partials), 2)
+        ]
+    return partials[0]
 
 
 def _linear_da(grad_output: Tensor, weight: Tensor, *, disable_split_k: bool) -> Tensor:
@@ -344,7 +449,7 @@ def _require_parallel_group(group: Any, name: str):
     if not dist.is_initialized():
         raise RuntimeError(f"{name}-parallel FFN requires an initialized process group.")
     if dist.get_world_size(group=group) <= 1:
-        raise ValueError(f"{name}_group must contain at least two ranks.")
+        return None
     return dist
 
 
@@ -498,18 +603,25 @@ class _DeterministicFFNFunction(torch.autograd.Function):
             )
             activated = _C.swiglu_packed_forward(gate_up)
         else:
-            gate = _linear_fwd(
+            gate = _canonical_tp_column_projection(
                 rmsnorm_output_2d,
                 gate_weight,
+                tp_world=tp_world,
                 disable_split_k=disable_split_k,
             )
-            up = _linear_fwd(
+            up = _canonical_tp_column_projection(
                 rmsnorm_output_2d,
                 up_weight,
+                tp_world=tp_world,
                 disable_split_k=disable_split_k,
             )
             activated = _C.swiglu_forward(gate, up)
-        output = _linear_fwd(activated, down_weight, disable_split_k=disable_split_k)
+        output = _canonical_tp_down_projection(
+            activated,
+            down_weight,
+            tp_world=tp_world,
+            disable_split_k=disable_split_k,
+        )
 
         if sequence_parallel:
             output = _reduce_scatter_tokens(output, tp_collective)

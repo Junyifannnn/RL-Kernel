@@ -6,6 +6,47 @@ does **not** require edits to `run_arm.py`, VIME model scripts, or shell
 launchers. Machine-specific paths belong in CLI options or `RLK_REPRO_*`
 environment variables; stable experiment changes belong in a copied profile.
 
+## CUDA quick path
+
+On one 8×H100 node, a new user only needs to provide the local Qwen3-8B
+checkpoint and a workspace. No VIME script or RL-Kernel example file needs to
+be edited:
+
+```bash
+python3 -m pip install -e .
+
+export RLK_REPRO_WORKSPACE=/data/rlk-repro
+export RLK_REPRO_MODEL_ROOT=/models/Qwen3-8B
+
+rlk-repro prepare \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --download-data \
+  --convert-checkpoint
+
+ray start --head \
+  --include-dashboard=true \
+  --dashboard-host=127.0.0.1 \
+  --num-gpus=8 \
+  --object-store-memory=200000000000
+
+rlk-repro doctor --workspace "$RLK_REPRO_WORKSPACE"
+rlk-repro run \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode native \
+  --rollouts 8 \
+  --wait
+rlk-repro run \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode consistency \
+  --rollouts 8 \
+  --wait
+```
+
+The default CUDA command uses the reference training topology TP4/CP2 and two
+TP4/CP1 rollout engines. Use `rlk-repro plan` before every non-default
+topology. Formal evidence runs must use clean source checkouts and must not pass
+`--allow-dirty`.
+
 ## Supported reference configuration
 
 The bundled CUDA profile targets one Linux node with eight 80 GB NVIDIA H100 GPUs.
@@ -34,23 +75,40 @@ while the table below records how much runtime evidence each layout has.
 
 | Backend | Training topology | Rollout topology | Status |
 |---|---|---|---|
-| CUDA H100 | TP4/CP2 | TP4/CP1, two engines | Supported reference topology; rerun the new no-reuse pair |
-| CUDA H100 | TP4/CP2 | TP2/CP1, TP2/CP2, TP4/CP2, or TP8/CP1 | Command and validator coverage; run an 8-step pair first |
-| CUDA H100 | TP8/CP1, TP2/CP4, or TP1/CP8 | Any 8-GPU-divisible rollout TP×CP | Experimental; configuration checks only |
+| CUDA H100 | TP4/CP2 | TP4/CP1, two engines | Supported reference topology |
+| CUDA H100 | TP1/CP8 | TP4/CP1, two engines | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
+| CUDA H100 | TP2/CP4 | TP4/CP1, two engines | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
+| CUDA H100 | TP8/CP1 | TP4/CP1, two engines | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
+| CUDA H100 | Any valid training TP×CP | Rollout CP greater than 1 | Experimental; requires vLLM prefill context-parallel integration and separate evidence |
+| CUDA H100 | TP4/CP2 | TP2/CP1 or TP8/CP1 | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
+| CUDA H100 | TP4/CP2 | TP1/CP1 | Canonical-shard code path is present; end-to-end validation pending |
 | ROCm MI300X | TP4/CP2 | TP4, two engines | Backend/topology has 200-step evidence; rerun the new no-reuse pair |
 | ROCm gfx942 | Other valid TP×CP | Rollout TP dividing available GPUs | Experimental; configuration checks only |
 
-For CUDA, rollout topology is available directly on `plan` and `run`:
+The validated TP2/CP4 CUDA smoke uses the same TP4 rollout topology:
 
 ```bash
 rlk-repro plan \
   --workspace "$RLK_REPRO_WORKSPACE" \
   --mode consistency \
-  --rollout-tp-size 2 \
-  --rollout-cp-size 2
+  --tp-size 2 \
+  --cp-size 4 \
+  --rollout-tp-size 4 \
+  --rollout-cp-size 1
+
+rlk-repro run \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode consistency \
+  --tp-size 2 \
+  --cp-size 4 \
+  --rollout-tp-size 4 \
+  --rollout-cp-size 1 \
+  --rollouts 8 \
+  --wait
 ```
 
-For example, an eight-step TP8/CP1 probe is:
+The same command form covers every validated eight-GPU training factorization.
+For example, TP8/CP1 is:
 
 ```bash
 rlk-repro run \
@@ -68,6 +126,66 @@ Passing argument validation proves only that GPU counts, Qwen3-8B sharding,
 and manifest relationships are coherent. A new training topology is supported
 only after both `native` and `consistency` pass the runtime validator on the
 target hardware.
+
+TP1/CP8 keeps the complete actor weights on every GPU. The CUDA launcher
+therefore defaults vLLM memory utilization to `0.2` for training TP1 and `0.4`
+otherwise. Users normally do not need to pass
+`--vllm-gpu-memory-utilization`; an explicit value still overrides the
+topology-aware default.
+
+### One-round CUDA smoke performance
+
+These numbers are single-run, 256-response-token smoke measurements from one
+8×H100 node on September 19, 2026. They verify that the strict paths remain
+usable; they are not a statistically controlled benchmark or a long-run
+throughput claim.
+
+| Training topology | Rollout topology | Train tokens/s | Rollout tokens/GPU/s | Step time |
+|---|---|---:|---:|---:|
+| TP4/CP2 | TP4/CP1 | 1292 | 71.7 | 28.0 s |
+| TP2/CP4 | TP4/CP1 | 1195 | 71.6 | 29.3 s |
+| TP1/CP8 | TP4/CP1 | 882 | 71.9 | 32.2 s |
+| TP8/CP1 | TP4/CP1 | 1328 | 52.7 | 29.4 s |
+| TP4/CP2 | TP2/CP1 | 1292 | 45.1 | 33.3 s |
+| TP4/CP2 | TP8/CP1 | — | 51.8 | — |
+
+The TP4/CP2 reference retains its original single-shard launches. Coarser
+physical TP uses additional canonical-shard GEMM launches, so equal bitwise
+results do not imply equal throughput. Different rollout TP values also change
+the number of engines and request concurrency.
+
+## Canonical topology strategy
+
+The non-default CUDA work reuses the TP4/CP2 implementation rather than
+maintaining a second operator stack. The launcher records a shared
+`canonical_tp`, currently the finer of training TP and rollout TP. A physical
+rank that owns more than one canonical shard executes those shards separately
+and combines them with the same fixed tree used by the finer topology.
+
+For the validated TP2/CP4 training and TP4/CP1 rollout pair:
+
+- one TP2 rank owns two adjacent canonical TP4 shards;
+- Attention output projection computes two TP4-width partial projections
+  before the existing deterministic TP reduction;
+- FFN gate, up, and down projections execute at TP4 shard widths, and the down
+  partials are combined in the TP4 fixed-tree order;
+- selected-token logp exposes TP4-sized virtual vocabulary summaries and
+  merges them in ascending global-vocabulary order;
+- CP changes token ownership only. Strict Attention reconstructs global
+  positions before the attention kernel, and CP is not a logp reduction axis.
+
+This keeps the reference TP4/CP2 hot path unchanged: `canonical_tp=4` gives
+exactly one shard per TP4 rank, so it does not add projection launches or a new
+reduction. Coarser TP layouts add launches but retain the existing
+cuBLASLt no-split-K kernels and fixed-tree collectives. Their performance must
+be measured; bitwise success alone is not a throughput claim.
+
+TP1/CP8 uses four TP4 virtual shards per physical training rank. TP8/CP1 or
+rollout TP8 selects canonical TP8; the vLLM QKV projection, output projection,
+packed FFN, and padded-vocabulary logp statistics use the corresponding TP8
+virtual shards while retaining CUDA Graph capture. Rollout CP greater than 1
+is a separate vLLM PCP integration task, not just another value for
+`canonical_tp`.
 
 ## Prepare once
 
@@ -163,43 +281,103 @@ passing sealed run contains `COMPLETE`.
 ## ROCm MI300X and gfx942
 
 ROCm uses a separate launcher because its strict path requires AITER/CK, RCCL,
-HIP Graph settings, and ROCm-specific runtime evidence. Activate a ROCm VIME
-environment, install this checkout with `pip install -e .`, and stop any
-existing Ray cluster; the ROCm launcher owns a fresh cluster for each arm.
+HIP Graph settings, and ROCm-specific runtime evidence. The user-facing
+`rlk-repro` command and topology flags are nevertheless shared with CUDA.
+Activate a ROCm VIME environment, install this checkout with
+`pip install -e .`, and stop any existing Ray cluster; the ROCm launcher owns a
+fresh cluster for each arm.
 
 Run the no-rollout-logprob-reuse pair with unique append-only directories:
 
 ```bash
-python -m examples.vime_rocm_attention_ablation.run_qwen3_8b \
+rlk-repro plan \
+  --backend rocm \
+  --workspace "$RLK_REPRO_WORKSPACE" \
   --mode native \
-  --num-rollout 8 \
-  --run-dir "$RLK_REPRO_WORKSPACE/data/runs/rocm-native-8" \
-  --rl-kernel-root "$PWD" \
-  --vime-root "$RLK_REPRO_WORKSPACE/vime" \
-  --megatron-root "$RLK_REPRO_WORKSPACE/Megatron-LM" \
-  --model-root "$RLK_REPRO_MODEL_ROOT" \
-  --reference-checkpoint "$RLK_REPRO_WORKSPACE/checkpoints/Qwen3-8B_torch_dist" \
-  --prompt-data "$RLK_REPRO_WORKSPACE/data/datasets/dapo-math-17k.vime.jsonl"
+  --rollouts 8
 
-python -m examples.vime_rocm_attention_ablation.run_qwen3_8b \
+rlk-repro run \
+  --backend rocm \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode native \
+  --rollouts 8 \
+  --run-id rocm-native-8 \
+  --wait
+
+rlk-repro run \
+  --backend rocm \
+  --workspace "$RLK_REPRO_WORKSPACE" \
   --mode consistency \
-  --num-rollout 8 \
-  --run-dir "$RLK_REPRO_WORKSPACE/data/runs/rocm-consistency-8" \
-  --rl-kernel-root "$PWD" \
-  --vime-root "$RLK_REPRO_WORKSPACE/vime" \
-  --megatron-root "$RLK_REPRO_WORKSPACE/Megatron-LM" \
-  --model-root "$RLK_REPRO_MODEL_ROOT" \
-  --reference-checkpoint "$RLK_REPRO_WORKSPACE/checkpoints/Qwen3-8B_torch_dist" \
-  --prompt-data "$RLK_REPRO_WORKSPACE/data/datasets/dapo-math-17k.vime.jsonl"
+  --rollouts 8 \
+  --run-id rocm-consistency-8 \
+  --wait
 ```
 
 Both commands recompute training logp. Neither sets
 `RLK_ABLATION_USE_ROLLOUT_LOGPROBS` or passes `--use-rollout-logprobs`.
 The runner validates readbacks and mismatch artifacts before returning success.
 
-The ROCm command accepts `--tp-size`, `--cp-size`, `--rollout-tp-size`,
-`--num-gpus`, and `--visible-gpus`. Any topology other than the evidenced
-8-GPU TP4/CP2/rollout-TP4 layout should begin with an eight-step pair.
+ROCm accepts the same `--rollouts`, `--tp-size`, `--cp-size`,
+`--rollout-tp-size`, and `--rollout-cp-size` flags as CUDA. It additionally
+accepts `--num-gpus` and `--visible-gpus` for hosts whose visible device set is
+not the default `0,1,2,3,4,5,6,7`. The compatibility spelling
+`--num-rollout` remains accepted by the direct Python launcher, but new user
+commands should use `--rollouts`.
+
+The topology validator requires:
+
+- training `TP × CP == num_gpus` for colocated execution;
+- both training TP and rollout TP to divide Qwen3-8B's 32 attention heads,
+  eight query groups, and padded vocabulary;
+- rollout `TP × CP` to divide `num_gpus`;
+- enough generated requests to feed every rollout engine.
+
+For example, the following configurations can be planned without editing any
+Python or shell file:
+
+```bash
+# TP2/CP4 training, two rollout engines using TP2/CP2 each.
+rlk-repro plan \
+  --backend rocm \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode consistency \
+  --rollouts 8 \
+  --tp-size 2 \
+  --cp-size 4 \
+  --rollout-tp-size 2 \
+  --rollout-cp-size 2
+
+# TP8/CP1 training and one TP8/CP1 rollout engine.
+rlk-repro plan \
+  --backend rocm \
+  --workspace "$RLK_REPRO_WORKSPACE" \
+  --mode consistency \
+  --rollouts 8 \
+  --tp-size 8 \
+  --cp-size 1 \
+  --rollout-tp-size 8 \
+  --rollout-cp-size 1
+```
+
+The launcher records the finer of training TP and rollout TP as
+`canonical_tp`, matching CUDA's topology strategy, and forwards rollout CP to
+vLLM prefill context parallelism. The TP4/CP2 training with TP4/CP1 rollout
+layout remains the ROCm reference configuration. Every other topology is
+experimental until an eight-step native/consistency pair passes on the target
+ROCm system; argument validation alone is not a bitwise or performance claim.
+
+The direct module remains available for automation and older scripts:
+
+```bash
+python -m examples.vime_rocm_attention_ablation.run_qwen3_8b \
+  --mode consistency \
+  --rollouts 8 \
+  --run-dir "$RLK_REPRO_WORKSPACE/data/runs/rocm-consistency-8" \
+  --tp-size 4 \
+  --cp-size 2 \
+  --rollout-tp-size 4 \
+  --rollout-cp-size 1
+```
 
 ## Configuration without script edits
 

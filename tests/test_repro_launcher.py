@@ -114,6 +114,48 @@ def test_non_reference_actor_topology_runs_without_an_opt_in_flag(tmp_path: Path
     assert command[command.index("--cp-size") + 1] == "1"
 
 
+def test_tp1_cuda_uses_memory_safe_vllm_default(tmp_path: Path):
+    profile = _profile()
+    args = build_parser().parse_args(
+        [
+            "plan",
+            "--workspace",
+            str(tmp_path),
+            "--mode",
+            "consistency",
+            "--tp-size",
+            "1",
+            "--cp-size",
+            "8",
+        ]
+    )
+    paths = _resolved_paths(profile, args)
+    command = _runner_command(paths, profile, args)
+    index = len(command) - 1 - command[::-1].index("--vllm-gpu-memory-utilization")
+
+    assert command[index + 1] == "0.2"
+
+
+def test_explicit_vllm_memory_fraction_overrides_profile(tmp_path: Path):
+    profile = _profile()
+    args = build_parser().parse_args(
+        [
+            "plan",
+            "--workspace",
+            str(tmp_path),
+            "--mode",
+            "consistency",
+            "--vllm-gpu-memory-utilization",
+            "0.31",
+        ]
+    )
+    paths = _resolved_paths(profile, args)
+    command = _runner_command(paths, profile, args)
+    index = len(command) - 1 - command[::-1].index("--vllm-gpu-memory-utilization")
+
+    assert command[index + 1] == "0.31"
+
+
 def test_doctor_enforces_frozen_runtime_and_ray(tmp_path: Path, monkeypatch):
     directories = {
         name: tmp_path / name

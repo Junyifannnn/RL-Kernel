@@ -489,6 +489,19 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         (paths.runtime_site, paths.cuda_python_site, paths.te_root)
     ):
         command.extend(["--extra-pythonpath", str(extra_pythonpath)])
+    for item in profile.get("runner_args", []):
+        command.extend([str(part) for part in item])
+    vllm_gpu_memory_utilization = (
+        float(args.vllm_gpu_memory_utilization)
+        if args.vllm_gpu_memory_utilization is not None
+        else (0.2 if int(args.tp_size) == 1 else 0.4)
+    )
+    command.extend(
+        [
+            "--vllm-gpu-memory-utilization",
+            str(vllm_gpu_memory_utilization),
+        ]
+    )
     if args.ray_address:
         command.extend(["--ray-address", args.ray_address])
     if args.run_id:
@@ -499,8 +512,6 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         command.append("--allow-dirty")
     if args.dry_run:
         command.append("--dry-run")
-    for item in profile.get("runner_args", []):
-        command.extend([str(part) for part in item])
     return command
 
 
@@ -723,6 +734,15 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--cp-size", type=int, default=2)
         command_parser.add_argument("--rollout-tp-size", type=int, default=4)
         command_parser.add_argument("--rollout-cp-size", type=int, default=1)
+        command_parser.add_argument(
+            "--vllm-gpu-memory-utilization",
+            type=float,
+            default=None,
+            help=(
+                "vLLM memory fraction; defaults to 0.2 for training TP1 "
+                "and 0.4 otherwise"
+            ),
+        )
         command_parser.add_argument("--run-id", default=None)
         command_parser.add_argument(
             "--wait",

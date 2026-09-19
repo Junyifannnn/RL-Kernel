@@ -1090,8 +1090,79 @@ def _patch_qwen3_strict_model(
             return unquantized_apply(method, layer, x, bias)
         x_2d = x.reshape(-1, x.shape[-1])
         linear = getattr(det_gemm, "linear", None)
+        marker = getattr(layer, _STRICT_PROJECTION_MARKER)
+        tp_world = int(getattr(layer, "tp_size", 1))
+        canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world)))
+        if canonical_tp < tp_world or canonical_tp % tp_world:
+            raise RuntimeError(
+                "RL_KERNEL_STRICT_CANONICAL_TP must be a positive multiple of "
+                f"rollout TP={tp_world}, got {canonical_tp}"
+            )
+        canonical_chunks = canonical_tp // tp_world
+
+        def project(
+            input_2d: torch.Tensor,
+            weight: torch.Tensor,
+            projection_bias: torch.Tensor | None = None,
+            *,
+            out: torch.Tensor | None = None,
+        ) -> torch.Tensor:
+            result = (
+                linear(input_2d, weight, out=out)
+                if linear is not None
+                else det_gemm(input_2d, weight.t().contiguous())
+            )
+            if projection_bias is not None:
+                result = result + projection_bias
+            return result
+
+        if marker == "qkv" and canonical_chunks > 1:
+            partition_sizes = tuple(int(size) for size in layer.output_partition_sizes)
+            if len(partition_sizes) != 3 or sum(partition_sizes) != layer.weight.size(0):
+                raise RuntimeError("strict QKV projection has an invalid fused weight layout")
+            weight_parts = layer.weight.split(partition_sizes, dim=0)
+            bias_parts = (
+                (None, None, None)
+                if bias is None
+                else bias.split(partition_sizes, dim=0)
+            )
+            component_outputs: list[list[torch.Tensor]] = [[], [], []]
+            for chunk in range(canonical_chunks):
+                chunk_weights = []
+                chunk_biases = []
+                chunk_sizes = []
+                for weight_part, bias_part in zip(weight_parts, bias_parts, strict=True):
+                    if weight_part.size(0) % canonical_chunks:
+                        raise RuntimeError(
+                            "strict QKV projection cannot form canonical TP shards"
+                        )
+                    rows = weight_part.size(0) // canonical_chunks
+                    start = chunk * rows
+                    chunk_weights.append(weight_part.narrow(0, start, rows))
+                    chunk_sizes.append(rows)
+                    if bias_part is not None:
+                        chunk_biases.append(bias_part.narrow(0, start, rows))
+                chunk_output = project(
+                    x_2d,
+                    torch.cat(chunk_weights, dim=0).contiguous(),
+                    None
+                    if bias is None
+                    else torch.cat(chunk_biases, dim=0).contiguous(),
+                )
+                for component, value in enumerate(chunk_output.split(chunk_sizes, dim=1)):
+                    component_outputs[component].append(value)
+            output_2d = torch.cat(
+                [torch.cat(values, dim=1) for values in component_outputs],
+                dim=1,
+            )
+            return output_2d.reshape(*x.shape[:-1], layer.weight.shape[0])
+
         collective = getattr(layer, _STRICT_O_PROJ_COLLECTIVE_MARKER, None)
-        if collective is not None and torch.version.hip is not None:
+        if (
+            collective is not None
+            and torch.version.hip is not None
+            and canonical_chunks == 1
+        ):
             if bias is not None or rocm_linear_all_reduce is None:
                 raise RuntimeError("strict ROCm o_proj fusion requires a bias-free linear")
             output_2d = rocm_linear_all_reduce(
@@ -1103,7 +1174,12 @@ def _patch_qwen3_strict_model(
             )
             return output_2d.reshape(*x.shape[:-1], layer.weight.shape[0])
         direct_output = None
-        if collective is not None and bias is None and linear is not None:
+        if (
+            collective is not None
+            and bias is None
+            and linear is not None
+            and canonical_chunks == 1
+        ):
             direct_output = collective.direct_staging_view(
                 (x_2d.size(0), layer.weight.shape[0]),
                 dtype=x.dtype,
@@ -1113,14 +1189,37 @@ def _patch_qwen3_strict_model(
                     direct_output,
                     collective_handle=int(collective._handle),
                 )
-        output_2d = (
-            linear(x_2d, layer.weight, out=direct_output)
-            if linear is not None
-            else det_gemm(x_2d, layer.weight.t().contiguous())
-        )
+        if marker == "o_proj" and canonical_chunks > 1:
+            if x_2d.size(1) % canonical_chunks or layer.weight.size(1) != x_2d.size(1):
+                raise RuntimeError(
+                    "strict Attention output projection cannot form canonical TP shards"
+                )
+            width = x_2d.size(1) // canonical_chunks
+            partials = [
+                project(
+                    x_2d.narrow(1, chunk * width, width).contiguous(),
+                    layer.weight.narrow(1, chunk * width, width).contiguous(),
+                )
+                for chunk in range(canonical_chunks)
+            ]
+            while len(partials) > 1:
+                partials = [
+                    partials[index] + partials[index + 1]
+                    for index in range(0, len(partials), 2)
+                ]
+            output_2d = partials[0]
+            if bias is not None:
+                output_2d = output_2d + bias
+        else:
+            output_2d = project(
+                x_2d,
+                layer.weight,
+                bias,
+                out=direct_output,
+            )
         setattr(layer, _STRICT_DIRECT_STAGING_MARKER, direct_output is not None)
         output = output_2d.reshape(*x.shape[:-1], layer.weight.shape[0])
-        return output if bias is None else output + bias
+        return output
 
     def strict_attention_rms_norm_forward(
         instance: Any,

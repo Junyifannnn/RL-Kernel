@@ -362,7 +362,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--max-response-len", type=int, default=7168)
     parser.add_argument("--max-tokens-per-gpu", type=int, default=4096)
-    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.4)
+    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=None)
     parser.add_argument(
         "--router-policy",
         choices=("round_robin", "random", "cache_aware"),
@@ -411,6 +411,13 @@ def main(argv: list[str] | None = None) -> int:
         tensor_parallel_size=args.tp_size,
         context_parallel_size=args.cp_size,
     )
+    vllm_gpu_memory_utilization = (
+        float(args.vllm_gpu_memory_utilization)
+        if args.vllm_gpu_memory_utilization is not None
+        else (0.2 if int(topology["tp"]) == 1 else 0.4)
+    )
+    if not 0.0 < vllm_gpu_memory_utilization < 1.0:
+        raise ValueError("--vllm-gpu-memory-utilization must be between 0 and 1")
 
     script_dir = Path(__file__).resolve().parent
     rl_kernel_root = _path(args.rl_kernel_root, "RL-Kernel root")
@@ -459,6 +466,9 @@ def main(argv: list[str] | None = None) -> int:
         args.router_policy,
         int(topology["rollout_engines"]),
     )
+    canonical_tp = max(int(topology["tp"]), int(topology["rollout_tp"]))
+    vocab_alignment = 128 * canonical_tp
+    canonical_vocab_size = ((151936 + vocab_alignment - 1) // vocab_alignment) * vocab_alignment
     env_vars = {
         "RL_KERNEL_ROOT": str(rl_kernel_root),
         "RL_KERNEL_REAL_PYTHON": str(python),
@@ -478,6 +488,11 @@ def main(argv: list[str] | None = None) -> int:
         "RL_KERNEL_ATTENTION_CASE": arm.attention_case,
         "RL_KERNEL_FFN_CASE": arm.ffn_case,
         "RL_KERNEL_LOGP_CASE": arm.logp_case,
+        # Use the finer of training and rollout TP as the shared virtual vocab
+        # partition. The TP4/CP2 reference remains canonical TP4 and therefore
+        # keeps its original one-summary-per-rank hot path.
+        "RL_KERNEL_STRICT_CANONICAL_TP": str(canonical_tp),
+        "RL_KERNEL_STRICT_CANONICAL_VOCAB_SIZE": str(canonical_vocab_size),
         "RL_KERNEL_READBACK_DIR": str(run_dir / "readbacks"),
         "RL_KERNEL_MISMATCH_SIDECAR_DIR": str(run_dir / "mismatch-sidecars"),
         "RL_KERNEL_VLLM_REAL_VOCAB_SIZE": "151936",
@@ -591,7 +606,7 @@ def main(argv: list[str] | None = None) -> int:
         "--vllm-prefill-context-parallel-size",
         str(topology["rollout_cp"]),
         "--vllm-gpu-memory-utilization",
-        str(args.vllm_gpu_memory_utilization),
+        str(vllm_gpu_memory_utilization),
         *_mismatch_metrics_args(),
     ]
     if arm.framework_use_rollout_logprobs:
@@ -607,7 +622,6 @@ def main(argv: list[str] | None = None) -> int:
                 "0",
             ]
         )
-
     submission_id = f"vime200-{run_id}"
     runtime_env = {"env_vars": env_vars}
     ray_command = [
@@ -676,6 +690,7 @@ def main(argv: list[str] | None = None) -> int:
             "cudagraph_mode": "FULL_DECODE_ONLY",
             "capture_sizes": list(range(1, max_engine_decode_batch + 1)),
             "enforce_eager": False,
+            "gpu_memory_utilization": vllm_gpu_memory_utilization,
         },
         "paths": {
             "run_dir": str(run_dir),

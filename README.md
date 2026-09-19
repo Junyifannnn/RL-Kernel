@@ -138,7 +138,9 @@ rlk-repro run --workspace /data/rlk-repro --mode consistency --rollouts 8 --wait
 Read the [Qwen3-8B train–rollout consistency guide](./docs/usage/qwen3-vime-consistency.md)
 before a 200-step evidence run; it lists the exact hardware/runtime contract,
 Ray sizing, ROCm commands, topology evidence levels, validation commands, and
-supported customization points.
+supported customization points. The guide also documents the CUDA TP2/CP4
+command and the canonical-TP strategy used to reuse the TP4/CP2 kernels without
+changing the default TP4/CP2 hot path.
 
 ### NVIDIA CUDA
 

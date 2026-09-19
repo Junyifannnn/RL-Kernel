@@ -648,6 +648,45 @@ def _patch_strict_attention_projections(
         output = output_2d.reshape(*input_value.shape[:-1], weight.shape[0])
         return output if bias is None else output + bias
 
+    def deterministic_output_projection(
+        module: Any,
+        input_value: torch.Tensor,
+        weight: torch.Tensor,
+        bias: torch.Tensor | None,
+    ) -> torch.Tensor:
+        """Use the configured canonical TP tree for row-parallel projection."""
+
+        tp_world = _tp_world_size(_module_tp_group(module))
+        canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world)))
+        if canonical_tp < tp_world or canonical_tp % tp_world:
+            raise RuntimeError(
+                "RL_KERNEL_STRICT_CANONICAL_TP must be a positive multiple of "
+                f"Attention TP={tp_world}, got {canonical_tp}"
+            )
+        chunks = canonical_tp // tp_world
+        if chunks == 1:
+            return deterministic_projection(input_value, weight, bias)
+        if input_value.size(-1) % chunks or weight.size(1) != input_value.size(-1):
+            raise RuntimeError(
+                "strict Attention output projection cannot form canonical TP chunks"
+            )
+        chunk_width = input_value.size(-1) // chunks
+        partials = [
+            deterministic_projection(
+                input_value.narrow(-1, chunk * chunk_width, chunk_width).contiguous(),
+                weight.narrow(1, chunk * chunk_width, chunk_width).contiguous(),
+                None,
+            )
+            for chunk in range(chunks)
+        ]
+        while len(partials) > 1:
+            partials = [
+                partials[index] + partials[index + 1]
+                for index in range(0, len(partials), 2)
+            ]
+        output = partials[0]
+        return output if bias is None else output + bias
+
     def record_collective_backend(core_attention: Any, attribute: str, backend: str) -> None:
         if core_attention is not None:
             setattr(core_attention, attribute, backend)
@@ -745,7 +784,7 @@ def _patch_strict_attention_projections(
         if not isinstance(weight, torch.Tensor):
             raise RuntimeError("strict Attention output projection requires an allocated weight")
         core_attention = getattr(module, _STRICT_ATTENTION_CORE_MARKER, None)
-        output = deterministic_projection(input_value, weight, None)
+        output = deterministic_output_projection(module, input_value, weight, None)
         output = strict_tp_reduce(module, core_attention, output)
         skip_bias_add = bool(getattr(module, "skip_bias_add", False))
         bias = getattr(module, "bias", None)
@@ -798,7 +837,9 @@ def _patch_strict_attention_projections(
                 return deterministic_projection(normalized, module.weight, None), None
 
             def te_projection_forward(module: Any, input_value: torch.Tensor) -> Any:
-                output = deterministic_projection(input_value, module.weight, None)
+                output = deterministic_output_projection(
+                    module, input_value, module.weight, None
+                )
                 return strict_tp_reduce(module, core_attention, output), None
 
             qkv.forward = MethodType(te_qkv_forward, qkv)
@@ -832,7 +873,9 @@ def _patch_strict_attention_projections(
         **kwargs: Any,
     ) -> torch.Tensor:
         if hasattr(instance, _STRICT_ATTENTION_PROJECTION_MARKER):
-            return deterministic_projection(input, weight, kwargs.get("bias"))
+            return deterministic_output_projection(
+                instance, input, weight, kwargs.get("bias")
+            )
         return row_forward_impl(instance, input, weight, *args, **kwargs)
 
     setattr(self_attention_cls, _STRICT_ATTENTION_PATCH_MARKER, attention_init)
