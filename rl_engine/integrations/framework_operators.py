@@ -1991,7 +1991,11 @@ class VllmFFNOperator:
             down,
             tp_group=tp_group,
         )
-        backend_id = "deterministic_all_reduce.ipc_localized_fixed_tree.v1"
+        backend_id = (
+            "none"
+            if bound_tp_world == 1
+            else "deterministic_all_reduce.ipc_localized_fixed_tree.v1"
+        )
         resolve_backend = getattr(operator, "packed_inference_backend_id", None)
         if callable(resolve_backend) and collective_handle:
             backend_id = str(resolve_backend(collective_handle))
@@ -2318,7 +2322,7 @@ class VllmLogpOperator:
                     1,
                     context.vocab_start_index,
                     local_vocab,
-                ).contiguous()
+                ).clone(memory_format=torch.contiguous_format)
             else:
                 # The final TP shard may include padded rows absent from the
                 # serving logits; retain the exact -inf padding contract.
@@ -2361,7 +2365,17 @@ class VllmLogpOperator:
                 )
             assert self._linear_logp is not None
             top_p_replay = False
-            if getattr(sampling_metadata, "top_p", None) is not None:
+            if self._worker_sampler:
+                # The GPU worker passes InputBatch, with sampling parameters
+                # stored separately and indexed by the active request mapping.
+                top_p_values = sampler.sampling_states.top_p.np[
+                    sampling_metadata.idx_mapping_np
+                ]
+                has_top_p = bool((top_p_values != 1.0).any())
+            else:
+                top_p_values = getattr(sampling_metadata, "top_p", None)
+                has_top_p = top_p_values is not None and bool((top_p_values != 1.0).any())
+            if has_top_p:
                 # Native vLLM has already applied temperature/top-p before it
                 # builds LogprobsTensors.  Reconstruct the exact finite nucleus
                 # on each TP shard so the strict replacement keeps processed

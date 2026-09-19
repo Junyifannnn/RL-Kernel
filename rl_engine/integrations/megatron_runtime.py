@@ -259,15 +259,18 @@ def _strict_rocm_rope_positions(
             raise RuntimeError("strict ROCm THD RoPE received invalid cu_seqlens")
         exact_global_freqs = int(freqs.size(0)) == values[-1]
         positions: list[int] = []
-        for index, (start, end) in enumerate(zip(values[:-1], values[1:], strict=True)):
+        for start, end in zip(values[:-1], values[1:], strict=True):
             length = end - start
             if length <= 0 or length % cp_size:
                 raise RuntimeError("strict ROCm THD RoPE sequence length is not CP divisible")
+            base = start if exact_global_freqs else 0
+            if cp_size == 1:
+                positions.extend(range(base, base + length))
+                continue
             local = length // cp_size
             if local % 2:
                 raise RuntimeError("strict ROCm THD RoPE local length must be even")
             half = local // 2
-            base = start if exact_global_freqs else 0
             positions.extend(range(base + cp_rank * half, base + (cp_rank + 1) * half))
             second = 2 * cp_size - cp_rank - 1
             positions.extend(range(base + second * half, base + (second + 1) * half))

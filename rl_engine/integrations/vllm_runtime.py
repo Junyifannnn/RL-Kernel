@@ -77,14 +77,17 @@ _ROCM_STATEFUL_GRAPH_SPLITTING_OPS = (
     DETERMINISTIC_ALL_REDUCE_OP,
     "rl_kernel::rocm_det_gemm_linear_all_reduce_inference",
     "rl_kernel::qwen3_ffn_packed_tp_inference_rocm",
+    "rl_kernel::rocm_row_parallel_reduce_from_slot",
 )
-_ROCM_FULL_GRAPH_CACHE_NAMESPACE = "rl_kernel_rocm_full_graph_v4"
+_ROCM_FULL_GRAPH_CACHE_NAMESPACE = "rl_kernel_rocm_full_graph_v8"
 _ROCM_GRAPH_ROUTE_ENVIRONMENT = (
     "RL_KERNEL_ATTENTION_CASE",
     "RL_KERNEL_FFN_CASE",
     "RL_KERNEL_LOGP_CASE",
     "RL_KERNEL_ROCM_PAGED_KV_MAX_TOKENS",
     "RL_KERNEL_ROCM_FIXED_PAGED_TILE",
+    "RL_KERNEL_STRICT_CANONICAL_TP",
+    "RL_KERNEL_STRICT_CANONICAL_VOCAB_SIZE",
 )
 
 
@@ -923,6 +926,9 @@ def _configure_strict_ffn_compilation(vllm_config: Any | None = None) -> None:
     from vllm import envs as vllm_envs
     from vllm.config import CUDAGraphMode
 
+    # Canonical BF16 parent sums must round at every tree level even when
+    # Inductor fuses multiple local additions into one pointwise kernel.
+    compilation.inductor_compile_config["emulate_precision_casts"] = True
     route_key = "_".join(
         re.sub(r"[^a-z0-9]+", "-", os.getenv(name, "unset").lower()).strip("-")
         for name in _ROCM_GRAPH_ROUTE_ENVIRONMENT
@@ -931,8 +937,9 @@ def _configure_strict_ffn_compilation(vllm_config: Any | None = None) -> None:
     cache_root = os.path.normpath(os.fspath(vllm_envs.VLLM_CACHE_ROOT))
     if os.path.basename(cache_root) != cache_namespace:
         # vLLM's AOT key cannot see implementations behind torch custom ops.
-        # Keep its normal config/code/compiler hashing under an RL-Kernel ABI
-        # namespace so an older custom-op artifact cannot be replayed silently.
+        # AOT loading also bypasses Dynamo's environment guards. Canonical TP
+        # and vocabulary change projection/reduction graphs at the same physical
+        # rollout TP, so they must participate in the cache namespace.
         os.environ["VLLM_CACHE_ROOT"] = os.path.join(
             cache_root, cache_namespace
         )
@@ -1000,7 +1007,7 @@ def _patch_qwen_ffn(integration: VllmIntegration) -> None:
                     )
                 )
                 compiled_evidence_armed = True
-            if tp_world_size > 1:
+            if tp_world_size > 1 or torch.version.hip is not None:
                 _configure_strict_ffn_compilation()
 
         setattr(Qwen2MLP, _STRICT_FFN_INIT_MARKER, original_init)
@@ -1066,14 +1073,17 @@ def _patch_qwen3_strict_model(
     if det_gemm is None:
         det_gemm = _strict_attention_projection_op()
     rocm_linear_all_reduce = None
+    rocm_reduce_from_slot = None
     register_rocm_linear_staging = None
     if torch.version.hip is not None:
         from rl_engine.kernels.ops.rocm.matmul.det_gemm import (
             det_gemm_linear_all_reduce_inference,
             register_det_gemm_all_reduce_staging,
+            row_parallel_reduce_from_slot,
         )
 
         rocm_linear_all_reduce = det_gemm_linear_all_reduce_inference
+        rocm_reduce_from_slot = row_parallel_reduce_from_slot
         register_rocm_linear_staging = register_det_gemm_all_reduce_staging
 
     attention_init = attention_cls.__init__
@@ -1120,11 +1130,13 @@ def _patch_qwen3_strict_model(
             partition_sizes = tuple(int(size) for size in layer.output_partition_sizes)
             if len(partition_sizes) != 3 or sum(partition_sizes) != layer.weight.size(0):
                 raise RuntimeError("strict QKV projection has an invalid fused weight layout")
-            weight_parts = layer.weight.split(partition_sizes, dim=0)
+            # Functional split avoids binding Tensor.split through vLLM's
+            # Parameter.__torch_function__ override during AOT tracing.
+            weight_parts = torch.split(layer.weight, partition_sizes, dim=0)
             bias_parts = (
                 (None, None, None)
                 if bias is None
-                else bias.split(partition_sizes, dim=0)
+                else torch.split(bias, partition_sizes, dim=0)
             )
             component_outputs: list[list[torch.Tensor]] = [[], [], []]
             for chunk in range(canonical_chunks):
@@ -1322,11 +1334,14 @@ def _patch_qwen3_strict_model(
                 raise RuntimeError("strict ROCm o_proj staging allocation failed")
             if register_rocm_linear_staging is None:
                 raise RuntimeError("strict ROCm o_proj staging registry is unavailable")
-            compiled_slot = register_rocm_linear_staging(
-                int(collective._handle), staging
-            )
+            compiled_slot = register_rocm_linear_staging(int(collective._handle), staging)
             setattr(module, _STRICT_O_PROJ_COMPILED_COLLECTIVE_SLOT, compiled_slot)
-            setattr(module, _STRICT_O_PROJ_FUSED_ALL_REDUCE_MARKER, True)
+            canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(module.tp_size)))
+            setattr(
+                module,
+                _STRICT_O_PROJ_FUSED_ALL_REDUCE_MARKER,
+                canonical_tp == int(module.tp_size),
+            )
 
     if row_parallel_cls is not None and not hasattr(
         row_parallel_cls, _STRICT_ROW_PARALLEL_PATCH_MARKER
@@ -1356,6 +1371,11 @@ def _patch_qwen3_strict_model(
                     getattr(instance, _STRICT_O_PROJ_FUSED_ALL_REDUCE_MARKER, False)
                 ):
                     output = output_parallel
+                elif rocm_reduce_from_slot is not None:
+                    output = rocm_reduce_from_slot(
+                        output_parallel,
+                        int(getattr(instance, _STRICT_O_PROJ_COMPILED_COLLECTIVE_SLOT)),
+                    )
                 elif bool(getattr(instance, _STRICT_DIRECT_STAGING_MARKER, False)):
                     output = deterministic_all_reduce_staged(
                         output_parallel,

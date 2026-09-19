@@ -280,104 +280,62 @@ passing sealed run contains `COMPLETE`.
 
 ## ROCm MI300X and gfx942
 
-ROCm uses a separate launcher because its strict path requires AITER/CK, RCCL,
-HIP Graph settings, and ROCm-specific runtime evidence. The user-facing
-`rlk-repro` command and topology flags are nevertheless shared with CUDA.
-Activate a ROCm VIME environment, install this checkout with
-`pip install -e .`, and stop any existing Ray cluster; the ROCm launcher owns a
-fresh cluster for each arm.
+ROCm shares the `rlk-repro` interface and uses the AITER/CK, RCCL and HIP Graph
+runner. PR #432 already contains #430; the ROCm changes build on #432's canonical
+shards and configurable sampling.
 
-Run the no-rollout-logprob-reuse pair with unique append-only directories:
-
-```bash
-rlk-repro plan \
-  --backend rocm \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode native \
-  --rollouts 8
-
-rlk-repro run \
-  --backend rocm \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode native \
-  --rollouts 8 \
-  --run-id rocm-native-8 \
-  --wait
-
-rlk-repro run \
-  --backend rocm \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode consistency \
-  --rollouts 8 \
-  --run-id rocm-consistency-8 \
-  --wait
-```
-
-Both commands recompute training logp. Neither sets
-`RLK_ABLATION_USE_ROLLOUT_LOGPROBS` or passes `--use-rollout-logprobs`.
-The runner validates readbacks and mismatch artifacts before returning success.
-
-ROCm accepts the same `--rollouts`, `--tp-size`, `--cp-size`,
-`--rollout-tp-size`, and `--rollout-cp-size` flags as CUDA. It additionally
-accepts `--num-gpus` and `--visible-gpus` for hosts whose visible device set is
-not the default `0,1,2,3,4,5,6,7`. The compatibility spelling
-`--num-rollout` remains accepted by the direct Python launcher, but new user
-commands should use `--rollouts`.
-
-The topology validator requires:
-
-- training `TP × CP == num_gpus` for colocated execution;
-- both training TP and rollout TP to divide Qwen3-8B's 32 attention heads,
-  eight query groups, and padded vocabulary;
-- rollout `TP × CP` to divide `num_gpus`;
-- enough generated requests to feed every rollout engine.
-
-For example, the following configurations can be planned without editing any
-Python or shell file:
+Activate the existing ROCm environment and select the machine profile once.
+The supplied profile describes the isolated MI300X experiment checkouts; copy
+it and edit `paths` for another installation. All four companion checkouts
+(RL-Kernel, VIME, Megatron and vLLM) must include the ROCm integration patches.
 
 ```bash
-# TP2/CP4 training, two rollout engines using TP2/CP2 each.
-rlk-repro plan \
-  --backend rocm \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode consistency \
-  --rollouts 8 \
-  --tp-size 2 \
-  --cp-size 4 \
-  --rollout-tp-size 2 \
-  --rollout-cp-size 2
+cd /workspace/rocm-unified-20260919/rl-kernel
+export PATH="$PWD/bin:/opt/venv/bin:$PATH"
+export RLK_REPRO_PROFILE="$PWD/examples/vime_rocm_attention_ablation/profiles/mi300x-qwen3-8b.json"
 
-# TP8/CP1 training and one TP8/CP1 rollout engine.
-rlk-repro plan \
-  --backend rocm \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode consistency \
-  --rollouts 8 \
-  --tp-size 8 \
-  --cp-size 1 \
-  --rollout-tp-size 8 \
-  --rollout-cp-size 1
+# One complete round: eight samples, maximum response length 7168.
+rlk-repro run --tp 2 --cp 4 --rollout-tp 4 --temperature 0.7 --top-p 0.95
+
+# Change topology and sampling without editing a script.
+rlk-repro run --tp 8 --cp 1 --rollout-tp 4 --temperature 1.3 --top-p 0.8
+
+# Inspect the resolved command; add --rollouts 200 for a longer run.
+rlk-repro plan --tp 4 --cp 2 --rollout-tp 2 --temperature 1 --top-p 1
 ```
 
-The launcher records the finer of training TP and rollout TP as
-`canonical_tp`, matching CUDA's topology strategy, and forwards rollout CP to
-vLLM prefill context parallelism. The TP4/CP2 training with TP4/CP1 rollout
-layout remains the ROCm reference configuration. Every other topology is
-experimental until an eight-step native/consistency pair passes on the target
-ROCm system; argument validation alone is not a bitwise or performance claim.
+`--profile FILE` overrides `RLK_REPRO_PROFILE`. Explicit CLI values override
+the profile's `defaults`; these defaults include backend, mode, topology,
+sampling, round count, workload sizes, Ray ports and memory fraction. The short
+flags are aliases for `--tp-size`, `--cp-size`, `--rollout-tp-size`,
+`--rollout-temperature` and `--rollout-top-p`. The module spelling
+`python -m rl_engine.repro` is equivalent to `rlk-repro`.
 
-The direct module remains available for automation and older scripts:
+The ROCm runner waits for completion, records the expanded command and source
+fingerprints, and validates operator readbacks, eight compared samples and
+strict train/rollout logprob equality before returning success. It explicitly
+disables rollout-logprob reuse. Each run gets a unique directory unless
+`--run-id NAME` is supplied; existing output directories are never overwritten.
+The launcher creates its own Ray cluster and refuses to stop an unrelated one.
 
-```bash
-python -m examples.vime_rocm_attention_ablation.run_qwen3_8b \
-  --mode consistency \
-  --rollouts 8 \
-  --run-dir "$RLK_REPRO_WORKSPACE/data/runs/rocm-consistency-8" \
-  --tp-size 4 \
-  --cp-size 2 \
-  --rollout-tp-size 4 \
-  --rollout-cp-size 1
-```
+On this eight-GPU Qwen3-8B setup, training `(TP, CP)` can be `(1,8)`, `(2,4)`,
+`(4,2)` or `(8,1)`; rollout TP can be 1, 2, 4 or 8. The finer training/rollout TP
+defines canonical shards. The padded vocabulary remains 152064 for every TP.
+Rollout CP greater than 1 still requires a PCP adapter and is rejected before
+launch. PP/EP and sequence parallelism are outside this runner's scope.
+
+Temperature must be finite and positive; top-p must be in `(0,1]`. For top-p
+below 1, the companion vLLM sampler returns its complete finite retained-token
+set through VIME to the existing deterministic logp kernel. There is no fixed
+64/128-token nucleus limit. The dynamic payload adds synchronization and
+transport cost; one-round timings include warmup and are not steady-state
+performance estimates. Top-k filtering and temperature zero are not supported
+by the strict replay contract and are rejected rather than ignored.
+
+The direct `examples.vime_rocm_attention_ablation.run_qwen3_8b` module remains
+available for older scripts. `--num-rollout` is its compatibility alias.
+Numerical evidence certifies train/rollout logprobs for the tested rounds;
+it does not certify identical trajectories or gradients across all topologies.
 
 ## Configuration without script edits
 

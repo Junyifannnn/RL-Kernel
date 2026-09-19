@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) 2026 RL-Kernel Contributors
 
+from types import SimpleNamespace
+
+import pytest
 import torch
 
 import rl_engine.kernels.ops.pytorch.ffn.ffn as ffn
@@ -84,7 +87,7 @@ def test_tp4_reference_path_keeps_single_gemm(monkeypatch):
         tp_world=4,
         disable_split_k=True,
     )
-    down = ffn._canonical_tp_down_projection(
+    ffn._canonical_tp_down_projection(
         column,
         down_weight,
         tp_world=4,
@@ -100,6 +103,7 @@ def test_tp4_reference_path_keeps_single_gemm(monkeypatch):
 
 def test_rollout_tp4_packed_ffn_reuses_tp8_shards(monkeypatch):
     calls = []
+    monkeypatch.setattr(torch.version, "hip", None)
 
     def fake_packed(input_value, fused_weight, down_weight):
         calls.append((fused_weight.shape, down_weight.shape))
@@ -132,3 +136,38 @@ def test_rollout_tp4_packed_ffn_reuses_tp8_shards(monkeypatch):
         (torch.Size([8, 4]), torch.Size([4, 4])),
     ]
     assert torch.equal(output, torch.full((2, 4), 3.0))
+
+
+@pytest.mark.parametrize("rows", [2, 64])
+def test_rocm_canonical_ffn_resolves_aot_slot_before_ipc_reduction(monkeypatch, rows):
+    monkeypatch.setattr(torch.version, "hip", "test")
+    monkeypatch.setenv("RL_KERNEL_STRICT_CANONICAL_TP", "8")
+    staging, stable_output = torch.zeros(32, 4), torch.zeros(32, 4)
+    monkeypatch.setitem(
+        ffn._PACKED_INFERENCE_STAGING_BY_HANDLE, 7, (987654, staging, stable_output)
+    )
+    observed = []
+
+    def reduce(handle, partial, output):
+        observed.append(handle)
+        output.copy_(partial * 4)
+
+    def packed(hidden, gate_up, down, chunks):
+        assert chunks == 2
+        return hidden.new_full((rows, 4), 3)
+
+    monkeypatch.setattr(
+        ffn, "_C", SimpleNamespace(deterministic_collective_rocm_ipc_all_reduce_input=reduce)
+    )
+    monkeypatch.setattr(ffn, "_canonical_packed_ffn_local_output", packed)
+    actual = ffn.qwen3_ffn_packed_inference(
+        torch.zeros(rows, 4),
+        torch.zeros(16, 4),
+        torch.zeros(4, 8),
+        collective_handle=7,
+        tp_world_size=4,
+    )
+    assert observed == [987654]
+    assert torch.equal(actual, torch.full((rows, 4), 12.0))
+    if rows <= 32:
+        assert actual.data_ptr() == stable_output.data_ptr()

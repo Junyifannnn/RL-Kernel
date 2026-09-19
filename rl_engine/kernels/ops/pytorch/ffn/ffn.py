@@ -139,6 +139,50 @@ def _qwen3_ffn_packed_inference_to_staging_fake(
     del rmsnorm_output, fused_gate_up_weight, down_weight, output
 
 
+def _canonical_packed_ffn_local_output(
+    rmsnorm_output: Tensor,
+    fused_gate_up_weight: Tensor,
+    down_weight: Tensor,
+    canonical_chunks: int,
+) -> Tensor:
+    if canonical_chunks == 1:
+        return _qwen3_ffn_packed_inference(
+            rmsnorm_output,
+            fused_gate_up_weight,
+            down_weight,
+        )
+    if fused_gate_up_weight.size(0) % 2:
+        raise ValueError("fused gate/up weight must contain equal gate and up shards")
+    intermediate = fused_gate_up_weight.size(0) // 2
+    if intermediate % canonical_chunks or down_weight.size(1) != intermediate:
+        raise ValueError("packed FFN weights cannot form canonical TP shards")
+    width = intermediate // canonical_chunks
+    gate_weight, up_weight = torch.split(fused_gate_up_weight, intermediate, dim=0)
+    partials = []
+    for chunk in range(canonical_chunks):
+        start = chunk * width
+        packed_weight = torch.cat(
+            (
+                gate_weight.narrow(0, start, width),
+                up_weight.narrow(0, start, width),
+            ),
+            dim=0,
+        ).contiguous()
+        partials.append(
+            _qwen3_ffn_packed_inference(
+                rmsnorm_output,
+                packed_weight,
+                down_weight.narrow(1, start, width).contiguous(),
+            )
+        )
+    while len(partials) > 1:
+        partials = [
+            partials[index] + partials[index + 1]
+            for index in range(0, len(partials), 2)
+        ]
+    return partials[0]
+
+
 @torch.library.custom_op(
     "rl_kernel::qwen3_ffn_packed_tp_inference_rocm",
     mutates_args=(),
@@ -148,6 +192,7 @@ def _qwen3_ffn_packed_tp_inference_rocm(
     fused_gate_up_weight: Tensor,
     down_weight: Tensor,
     collective_handle: int,
+    canonical_chunks: int = 1,
 ) -> Tensor:
     """Keep the ROCm TP FFN behind one eager graph-partition boundary."""
 
@@ -157,6 +202,16 @@ def _qwen3_ffn_packed_tp_inference_rocm(
     runtime_handle, staging, stable_output = binding
     input_shape = rmsnorm_output.shape
     rows = rmsnorm_output.numel() // input_shape[-1]
+    if canonical_chunks > 1:
+        partial = _canonical_packed_ffn_local_output(
+            rmsnorm_output, fused_gate_up_weight, down_weight, canonical_chunks
+        ).reshape(rows, down_weight.shape[0])
+        output = (stable_output.narrow(0, 0, rows) if rows <= staging.size(0)
+                  else torch.empty_like(partial).reshape(rows, down_weight.shape[0]))
+        # collective_handle is an AOT-stable slot, not a C++ IPC pointer.
+        # Resolve it inside this opaque operation before the physical reduction.
+        _C.deterministic_collective_rocm_ipc_all_reduce_input(runtime_handle, partial, output)
+        return output.reshape(*input_shape[:-1], down_weight.shape[0])
     if rows <= staging.size(0):
         # Keep the output address stable across piecewise HIP-graph capture and
         # replay so the next captured partition reads the current invocation.
@@ -197,8 +252,9 @@ def _qwen3_ffn_packed_tp_inference_rocm_fake(
     fused_gate_up_weight: Tensor,
     down_weight: Tensor,
     collective_handle: int,
+    canonical_chunks: int = 1,
 ) -> Tensor:
-    del fused_gate_up_weight, collective_handle
+    del fused_gate_up_weight, collective_handle, canonical_chunks
     return rmsnorm_output.new_empty(
         (*rmsnorm_output.shape[:-1], down_weight.shape[0])
     )
@@ -224,42 +280,9 @@ def qwen3_ffn_packed_inference(
     canonical_chunks = canonical_tp // tp_world_size
 
     def canonical_local_output() -> Tensor:
-        if canonical_chunks == 1:
-            return _qwen3_ffn_packed_inference(
-                rmsnorm_output,
-                fused_gate_up_weight,
-                down_weight,
-            )
-        if fused_gate_up_weight.size(0) % 2:
-            raise ValueError("fused gate/up weight must contain equal gate and up shards")
-        intermediate = fused_gate_up_weight.size(0) // 2
-        if intermediate % canonical_chunks or down_weight.size(1) != intermediate:
-            raise ValueError("packed FFN weights cannot form canonical TP shards")
-        width = intermediate // canonical_chunks
-        gate_weight, up_weight = fused_gate_up_weight.split(intermediate, dim=0)
-        partials = []
-        for chunk in range(canonical_chunks):
-            start = chunk * width
-            packed_weight = torch.cat(
-                (
-                    gate_weight.narrow(0, start, width),
-                    up_weight.narrow(0, start, width),
-                ),
-                dim=0,
-            ).contiguous()
-            partials.append(
-                _qwen3_ffn_packed_inference(
-                    rmsnorm_output,
-                    packed_weight,
-                    down_weight.narrow(1, start, width).contiguous(),
-                )
-            )
-        while len(partials) > 1:
-            partials = [
-                partials[index] + partials[index + 1]
-                for index in range(0, len(partials), 2)
-            ]
-        return partials[0]
+        return _canonical_packed_ffn_local_output(
+            rmsnorm_output, fused_gate_up_weight, down_weight, canonical_chunks
+        )
 
     if tp_world_size <= 1:
         return canonical_local_output()
@@ -275,12 +298,13 @@ def qwen3_ffn_packed_inference(
         # prepare_packed_inference and stay behind the opaque custom op below.
         output = canonical_local_output()
         return collective.all_reduce(output, out=output)
-    if getattr(torch.version, "hip", None) is not None and canonical_chunks == 1:
+    if getattr(torch.version, "hip", None) is not None:
         return _qwen3_ffn_packed_tp_inference_rocm(
             rmsnorm_output,
             fused_gate_up_weight,
             down_weight,
             collective_handle,
+            canonical_chunks,
         )
     input_shape = rmsnorm_output.shape
     output_shape_2d = (
@@ -596,11 +620,20 @@ class _DeterministicFFNFunction(torch.autograd.Function):
         packed_gate_up = fused_gate_up_weight is not None and disable_split_k
         if packed_gate_up:
             assert fused_gate_up_weight is not None
-            gate_up = _linear_fwd(
-                rmsnorm_output_2d,
-                fused_gate_up_weight,
-                disable_split_k=True,
-            )
+            canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world)))
+            if canonical_tp == tp_world:
+                gate_up = _linear_fwd(rmsnorm_output_2d, fused_gate_up_weight, disable_split_k=True)
+            else:
+                gate_w, up_w = fused_gate_up_weight.chunk(2, dim=0)
+                gate_up = torch.cat(
+                    [
+                        _canonical_tp_column_projection(
+                            rmsnorm_output_2d, w, tp_world=tp_world, disable_split_k=True
+                        )
+                        for w in (gate_w, up_w)
+                    ],
+                    dim=-1,
+                )
             activated = _C.swiglu_packed_forward(gate_up)
         else:
             gate = _canonical_tp_column_projection(
@@ -650,6 +683,7 @@ class _DeterministicFFNFunction(torch.autograd.Function):
         ctx.input_shape = input_shape
         ctx.tp_collective = tp_collective
         ctx.cp_collective = cp_collective
+        ctx.tp_world = tp_world
         ctx.sequence_parallel = sequence_parallel
         ctx.disable_split_k = disable_split_k
         ctx.packed_gate_up = packed_gate_up
@@ -745,13 +779,30 @@ class _DeterministicFFNFunction(torch.autograd.Function):
                 disable_split_k=disable_split_k,
             )
 
-        # Gate/Up input gradients reduce across TP, then add locally.
-        grad_rmsnorm_from_gate = _linear_da(
+        # Use the same canonical K subtrees before the physical TP reduction.
+        def input_grad(gradient: Tensor, weight: Tensor, *, disable_split_k: bool) -> Tensor:
+            canonical_tp = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(ctx.tp_world)))
+            chunks = canonical_tp // ctx.tp_world
+            if chunks == 1:
+                return _linear_da(gradient, weight, disable_split_k=disable_split_k)
+            if weight.size(0) % chunks:
+                raise ValueError("FFN input gradient cannot form canonical TP shards")
+            partials = [
+                _linear_da(g.contiguous(), w.contiguous(), disable_split_k=disable_split_k)
+                for g, w in zip(
+                    gradient.chunk(chunks, dim=-1), weight.chunk(chunks, dim=0), strict=True
+                )
+            ]
+            while len(partials) > 1:
+                partials = [partials[i] + partials[i + 1] for i in range(0, len(partials), 2)]
+            return partials[0]
+
+        grad_rmsnorm_from_gate = input_grad(
             grad_gate,
             gate_weight,
             disable_split_k=disable_split_k,
         )
-        grad_rmsnorm_from_up = _linear_da(
+        grad_rmsnorm_from_up = input_grad(
             grad_up,
             up_weight,
             disable_split_k=disable_split_k,

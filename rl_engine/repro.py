@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shlex
 import shutil
@@ -71,6 +72,7 @@ def _repo_root() -> Path:
 
 
 def _find_profile(value: str | None) -> Path:
+    value = value or os.environ.get("RLK_REPRO_PROFILE")
     if value:
         candidate = Path(value).expanduser()
         if candidate.is_file():
@@ -152,6 +154,10 @@ def resolve_paths(
 
     def choose(value: str | None, profile_key: str, env_name: str, default: Path | None) -> Path:
         selected = _override_or_env(value or _profile_path(profile, profile_key), env_name)
+        if selected and profile_key in {"python", "ray"}:
+            # A venv Python is often a symlink to the system executable.
+            # Resolving that symlink discards pyvenv.cfg and its packages.
+            return Path(selected).expanduser().absolute()
         return _path(selected) or _required_path(default, profile_key)
 
     active_runtime = Path(sys.prefix).resolve()
@@ -162,7 +168,7 @@ def resolve_paths(
     python_major_minor = ".".join(required_python.split(".")[:2])
     runtime_site_packages = runtime_path / f"lib/python{python_major_minor}/site-packages"
     runtime_python = (
-        Path(sys.executable).resolve()
+        Path(sys.executable).absolute()
         if runtime_path == active_runtime
         else runtime_path / f"bin/python{python_major_minor}"
     )
@@ -439,6 +445,69 @@ def _example_root_for_run(run_dir: Path) -> Path:
 
 def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namespace) -> list[str]:
     arm = canonical_arm(args.arm)
+    if getattr(args, "backend", "cuda") == "rocm":
+        _validate_topology_args(args)
+        if args.rollout_cp_size != 1:
+            raise ReproError("ROCm rollout CP > 1 requires a validated PCP adapter")
+        if not math.isfinite(args.rollout_temperature) or args.rollout_temperature <= 0:
+            raise ReproError("--temperature must be finite and positive")
+        if not 0 < args.rollout_top_p <= 1:
+            raise ReproError("--top-p must be in (0, 1]")
+        if args.rollouts <= 0:
+            raise ReproError("--rollouts must be positive")
+        run_id = args.run_id or datetime.now(timezone.utc).strftime(f"{arm}-%Y%m%dT%H%M%S%fZ")
+        if Path(run_id).name != run_id or run_id in (".", ".."):
+            raise ReproError("--run-id must be a single directory name")
+        command = [
+            str(paths.python),
+            "-m",
+            "examples.vime_rocm_attention_ablation.run_qwen3_8b",
+            "--mode",
+            arm,
+            "--run-dir",
+            str(paths.output_root / run_id),
+        ]
+        for flag, value in {
+            "rollouts": args.rollouts,
+            "seed": args.seed,
+            "rollout-seed": args.rollout_seed,
+            "tp-size": args.tp_size,
+            "cp-size": args.cp_size,
+            "rollout-tp-size": args.rollout_tp_size,
+            "rollout-cp-size": args.rollout_cp_size,
+            "rollout-temperature": args.rollout_temperature,
+            "rollout-top-p": args.rollout_top_p,
+            "rl-kernel-root": paths.rl_kernel_root,
+            "vime-root": paths.vime_root,
+            "megatron-root": paths.megatron_root,
+            "model-root": paths.model_root,
+            "reference-checkpoint": paths.ref_load,
+            "prompt-data": paths.prompt_data,
+        }.items():
+            command.extend([f"--{flag}", str(value)])
+        if args.vllm_gpu_memory_utilization is not None:
+            command.extend(["--vllm-gpu-memory-utilization", str(args.vllm_gpu_memory_utilization)])
+        for name in (
+            "ray_port",
+            "ray_dashboard_port",
+            "samples_per_prompt",
+            "global_batch_size",
+            "rollout_batch_size",
+            "max_response_length",
+            "max_tokens_per_gpu",
+        ):
+            value = getattr(args, name, None)
+            if value is not None:
+                command.extend([f"--{name.replace('_', '-')}", str(value)])
+        return command
+    rocm_only = [
+        name for name in (
+            "ray_port", "ray_dashboard_port", "samples_per_prompt", "global_batch_size",
+            "rollout_batch_size", "max_response_length", "max_tokens_per_gpu",
+        ) if getattr(args, name, None) is not None
+    ]
+    if rocm_only:
+        raise ReproError("these workload options require --backend rocm: " + ", ".join(rocm_only))
     _arm_config(profile, arm)
     _validate_topology_args(args)
     # The launcher and runner are one interface and must come from the same
@@ -719,6 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("plan", "run"):
         command_parser = subparsers.add_parser(command, help=f"{command} one reproduction mode")
         _add_path_options(command_parser)
+        command_parser.add_argument("--backend", choices=("cuda", "rocm"), default="cuda")
         command_parser.add_argument(
             "--mode",
             default="native",
@@ -734,20 +804,31 @@ def build_parser() -> argparse.ArgumentParser:
         )
         command_parser.add_argument("--seed", type=int, default=1234)
         command_parser.add_argument("--rollout-seed", type=int, default=1234)
-        command_parser.add_argument("--tp-size", type=int, default=4)
-        command_parser.add_argument("--cp-size", type=int, default=2)
-        command_parser.add_argument("--rollout-tp-size", type=int, default=4)
-        command_parser.add_argument("--rollout-cp-size", type=int, default=1)
-        command_parser.add_argument("--rollout-temperature", type=float, default=1.0)
-        command_parser.add_argument("--rollout-top-p", type=float, default=1.0)
+        command_parser.add_argument("--tp-size", "--tp", type=int, default=4)
+        command_parser.add_argument("--cp-size", "--cp", type=int, default=2)
+        command_parser.add_argument("--rollout-tp-size", "--rollout-tp", type=int, default=4)
+        command_parser.add_argument("--rollout-cp-size", "--rollout-cp", type=int, default=1)
+        command_parser.add_argument(
+            "--rollout-temperature", "--temperature", type=float, default=1.0
+        )
+        command_parser.add_argument("--rollout-top-p", "--top-p", type=float, default=1.0)
+        for name in (
+            "ray-port",
+            "ray-dashboard-port",
+            "samples-per-prompt",
+            "global-batch-size",
+            "rollout-batch-size",
+            "max-response-length",
+            "max-tokens-per-gpu",
+        ):
+            command_parser.add_argument(
+                f"--{name}", type=int, default=None, help="ROCm workload option"
+            )
         command_parser.add_argument(
             "--vllm-gpu-memory-utilization",
             type=float,
             default=None,
-            help=(
-                "vLLM memory fraction; defaults to 0.2 for training TP1 "
-                "and 0.4 otherwise"
-            ),
+            help=("vLLM memory fraction; defaults to 0.2 for training TP1 and 0.4 otherwise"),
         )
         command_parser.add_argument("--run-id", default=None)
         command_parser.add_argument(
@@ -783,9 +864,38 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(argv)
     try:
         profile, _profile_path_value = _load_profile(getattr(args, "profile", None))
+        if args.command in ("plan", "run"):
+            defaults = profile.get("defaults", {})
+            allowed = {
+                "backend",
+                "mode",
+                "rollouts",
+                "tp",
+                "cp",
+                "rollout-tp",
+                "rollout-cp",
+                "temperature",
+                "top-p",
+                "seed",
+                "rollout-seed",
+                "ray-port",
+                "ray-dashboard-port",
+                "samples-per-prompt",
+                "global-batch-size",
+                "rollout-batch-size",
+                "max-response-length",
+                "max-tokens-per-gpu",
+                "vllm-gpu-memory-utilization",
+            }
+            if not isinstance(defaults, dict) or set(defaults) - allowed:
+                raise ReproError("profile defaults contains unsupported run options")
+            flags = [part for key, value in defaults.items() for part in (f"--{key}", str(value))]
+            # Explicit command-line values come last and override the machine profile.
+            args = parser.parse_args([argv[0], *flags, *argv[1:]])
         if args.command == "validate":
             run_dir = args.run_dir.expanduser().resolve()
             command = [
@@ -809,6 +919,27 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_plan(paths, profile, args)
             return 0
         if args.command == "run":
+            if args.backend == "rocm":
+                if args.dry_run:
+                    _print_plan(paths, profile, args)
+                    return 0
+                command = _runner_command(paths, profile, args)
+                env = os.environ.copy()
+                env["PYTHONPATH"] = os.pathsep.join(
+                    filter(
+                        None,
+                        (
+                            str(paths.rl_kernel_root),
+                            str(paths.vime_root),
+                            str(paths.megatron_root),
+                            _profile_path(profile, "vllm_root"),
+                            env.get("PYTHONPATH", ""),
+                        ),
+                    )
+                )
+                # The ROCm launcher checks paths, plugin installation, HIP devices,
+                # and Ray ownership before starting; CUDA doctor is not applicable.
+                return _run(command, env=env).returncode
             preflight = doctor(paths, profile, ray_address=args.ray_address)
             if preflight:
                 print("Run aborted: fix the failed doctor checks first.", file=sys.stderr)
