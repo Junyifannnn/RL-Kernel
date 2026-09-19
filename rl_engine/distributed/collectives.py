@@ -3,8 +3,8 @@
 
 from __future__ import annotations
 
-import socket
 import os
+import socket
 import sys
 import threading
 from collections.abc import Iterable
@@ -35,8 +35,13 @@ def _ipc_allocation_context():
     impl = getattr(saver, "_impl", None)
     binary = getattr(impl, "_binary_wrapper", None)
     active = getattr(getattr(binary, "cdll", None), "tms_get_interesting_region", None)
-    if callable(active) and active():
-        return saver.disable()
+    if callable(active):
+        if active():
+            return saver.disable()
+        # Turning off the hook does not evict VMM allocations already cached
+        # in PyTorch's default pool. A fresh pool must own IPC storage even
+        # when allocation hooks are currently disabled (e.g. another Ray call).
+        return torch.cuda.use_mem_pool(torch.cuda.MemPool())
     return nullcontext()
 
 

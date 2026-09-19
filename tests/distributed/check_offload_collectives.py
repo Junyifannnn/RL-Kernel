@@ -30,4 +30,23 @@ for phase in range(2):
 if rank == 0:
     print("OFFLOAD_IPC_RESULT=PASS before and after pause/resume", flush=True)
 collective.close()
+
+# Ray can enter a later call with hooks disabled while the default allocator
+# still caches offloadable VMM blocks from a previous call. Reproduce that
+# state before creating another IPC arena; toggling the hook alone is unsafe.
+cached = torch.zeros(3 * (64 * 1024 * 1024 + 32), dtype=torch.uint8, device="cuda")
+torch.cuda.synchronize()
+del cached
+binary = saver._impl._binary_wrapper.cdll
+binary.tms_set_interesting_region(False)
+try:
+    inactive = DeterministicCollective(max_size_bytes=64 * 1024 * 1024)
+    result = inactive.all_reduce(x)
+    assert torch.equal(result, torch.full_like(x, 36.0))
+    dist.barrier()
+    inactive.close()
+finally:
+    binary.tms_set_interesting_region(True)
+if rank == 0:
+    print("OFFLOAD_IPC_INACTIVE_RESULT=PASS with cached VMM allocations", flush=True)
 dist.destroy_process_group()
