@@ -63,6 +63,7 @@ _STRICT_O_PROJ_COLLECTIVE_MARKER = "__rl_kernel_o_proj_collective__"
 _STRICT_O_PROJ_FUSED_ALL_REDUCE_MARKER = "__rl_kernel_o_proj_fused_all_reduce__"
 _STRICT_O_PROJ_COMPILED_COLLECTIVE_SLOT = "__rl_kernel_o_proj_compiled_collective_slot__"
 _STRICT_ROW_PARALLEL_PATCH_MARKER = "__rl_kernel_original_row_parallel_forward__"
+_STRICT_TOKENS_LOGPROBS_PATCH_MARKER = "__rl_kernel_original_tokens_logprobs__"
 _STRICT_DIRECT_STAGING_MARKER = "__rl_kernel_direct_staging_active__"
 _STRICT_LAYER_DIAGNOSTIC_PATCH_MARKER = "__rl_kernel_original_layer_diagnostic_forward__"
 _STRICT_WEIGHT_CACHE_REFRESH_MARKER = "__rl_kernel_original_finish_weight_update__"
@@ -1494,6 +1495,48 @@ def _patch_worker_sampler(integration: VllmIntegration, *, strict_linear_logp: b
     integration.record_installed_hook("logp", "vllm.v1.worker.gpu.sample.sampler.Sampler.__call__")
 
 
+def _patch_tokens_api_top_logprobs() -> None:
+    """Preserve token IDs on tokens-only API top-logprob entries."""
+
+    from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionLogProb
+    from vllm.entrypoints.serve.disagg.serving import ServingTokens
+
+    if hasattr(ServingTokens, _STRICT_TOKENS_LOGPROBS_PATCH_MARKER):
+        return
+    original = ServingTokens._create_tokens_logprobs
+
+    def wrapped(
+        instance: Any,
+        token_ids: Any,
+        top_logprobs: Any,
+        num_output_top_logprobs: int | None = None,
+    ) -> Any:
+        result = original(
+            instance,
+            token_ids,
+            top_logprobs,
+            num_output_top_logprobs,
+        )
+        if num_output_top_logprobs is None:
+            return result
+        limit = max(int(num_output_top_logprobs), 1)
+        for content, step in zip(result.content, top_logprobs, strict=True):
+            if step is None:
+                continue
+            content.top_logprobs = [
+                ChatCompletionLogProb(
+                    token=f"token_id:{int(token_id)}",
+                    logprob=max(float(logprob.logprob), -9999.0),
+                )
+                for index, (token_id, logprob) in enumerate(step.items())
+                if index < limit
+            ]
+        return result
+
+    setattr(ServingTokens, _STRICT_TOKENS_LOGPROBS_PATCH_MARKER, original)
+    ServingTokens._create_tokens_logprobs = wrapped
+
+
 def _register_attention_backend(integration: VllmIntegration) -> None:
     global _RLK_ATTENTION_BACKEND, _RLK_ATTENTION_BUILDER, _RLK_ATTENTION_IMPL
 
@@ -1674,6 +1717,7 @@ def install_vllm_integration(plan: IntegrationPlan) -> VllmIntegration:
         _patch_rocm_weight_cache_refresh()
     _patch_qwen3_layer_alignment_diagnostics()
     if strict_linear_logp:
+        _patch_tokens_api_top_logprobs()
         _patch_qwen_lm_head_padding()
         _patch_strict_lm_head_linear()
         _patch_qwen_compute_logits(integration)

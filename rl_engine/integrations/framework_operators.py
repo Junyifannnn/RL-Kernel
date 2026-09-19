@@ -2287,6 +2287,17 @@ class VllmLogpOperator:
         _require_nvidia_cuda(source_logits, "Logp")
         context = None
         local_logits = None
+        sampling_mask = None
+        sampling_temperature = getattr(sampling_metadata, "temperature", None)
+        if sampling_temperature is None:
+            sampling_temperature = 1.0
+        support_temperature = sampling_temperature
+        if isinstance(sampling_temperature, torch.Tensor):
+            sampling_temperature = torch.where(
+                sampling_temperature < 1e-5, 1.0, sampling_temperature
+            )
+        elif sampling_temperature < 1e-5:
+            sampling_temperature = 1.0
         if self._strict_linear_logp:
             context = take_rollout_linear_logp_context()
             if source_logits.ndim != 2:
@@ -2318,7 +2329,7 @@ class VllmLogpOperator:
                     1,
                     context.vocab_start_index,
                     local_vocab,
-                ).contiguous()
+                ).clone(memory_format=torch.contiguous_format)
             else:
                 # The final TP shard may include padded rows absent from the
                 # serving logits; retain the exact -inf padding contract.
@@ -2334,6 +2345,20 @@ class VllmLogpOperator:
                             available,
                         )
                     )
+            if (getattr(sampling_metadata, "top_p", None) is not None
+                    or getattr(sampling_metadata, "top_k", None) is not None):
+                from rl_engine.integrations.sampling import sampling_keep_mask
+
+                complete_mask = sampling_keep_mask(
+                    source_logits[:, :context.real_vocab_size],
+                    temperature=support_temperature,
+                    top_p=getattr(sampling_metadata, "top_p", None),
+                    top_k=getattr(sampling_metadata, "top_k", None),
+                )
+                sampling_mask = torch.zeros_like(local_logits, dtype=torch.bool)
+                sampling_mask[:, :available] = complete_mask[
+                    :, context.vocab_start_index:context.vocab_start_index + available
+                ]
         if self._worker_sampler:
             result = self._native_forward(sampler, logits, sampling_metadata)
         else:
@@ -2360,50 +2385,22 @@ class VllmLogpOperator:
                     f"{context.hidden.size(0)} != {token_ids.numel()}"
                 )
             assert self._linear_logp is not None
-            top_p_replay = False
-            if getattr(sampling_metadata, "top_p", None) is not None:
-                # Native vLLM has already applied temperature/top-p before it
-                # builds LogprobsTensors.  Reconstruct the exact finite nucleus
-                # on each TP shard so the strict replacement keeps processed
-                # logprob semantics instead of accidentally substituting a
-                # full-vocabulary selected logprob.
-                replay_ids = logprobs_tensors.logprob_token_ids
-                replay_values = logprobs_tensors.logprobs
-                if replay_ids.shape != replay_values.shape:
-                    raise RuntimeError(
-                        "vLLM top-p replay ids and logprobs must have matching shapes"
-                    )
-                if replay_ids.size(0) != local_logits.size(0):
-                    raise RuntimeError(
-                        "vLLM top-p replay rows are not aligned with strict local logits"
-                    )
-                top_p_replay = True
-            if top_p_replay:
-                selected = self._linear_logp.from_local_logits_top_p(
-                    local_logits,
-                    token_ids,
-                    replay_ids,
-                    replay_values,
-                    tp_group=context.tp_group,
-                    vocab_start_index=context.vocab_start_index,
-                    global_vocab_size=context.global_vocab_size,
-                    real_vocab_size=context.real_vocab_size,
-                    temperature=float(os.getenv("RL_KERNEL_VLLM_TEMPERATURE", "1.0")),
-                    target="rollout",
-                )
-            else:
-                selected = self._linear_logp.from_local_logits(
-                    local_logits,
-                    token_ids,
-                    tp_group=context.tp_group,
-                    vocab_start_index=context.vocab_start_index,
-                    global_vocab_size=context.global_vocab_size,
-                    real_vocab_size=context.real_vocab_size,
-                    temperature=float(os.getenv("RL_KERNEL_VLLM_TEMPERATURE", "1.0")),
-                    target="rollout",
-                    diagnostics_hidden=context.hidden,
-                    diagnostics_lm_head_weight=context.lm_head_weight,
-                )
+            # Score the complete support; API top-logprob truncation is irrelevant.
+            top_p_replay = sampling_mask is not None
+            if sampling_mask is not None:
+                local_logits = local_logits.masked_fill(~sampling_mask, float("-inf"))
+            selected = self._linear_logp.from_local_logits(
+                local_logits,
+                token_ids,
+                tp_group=context.tp_group,
+                vocab_start_index=context.vocab_start_index,
+                global_vocab_size=context.global_vocab_size,
+                real_vocab_size=context.real_vocab_size,
+                temperature=sampling_temperature,
+                target="rollout",
+                diagnostics_hidden=context.hidden,
+                diagnostics_lm_head_weight=context.lm_head_weight,
+            )
             strict_provenance = self._linear_logp.provenance
             expected_entrypoints = {
                 "rocm_vocab_parallel_logp_from_local_logits_tp"

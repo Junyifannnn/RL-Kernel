@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shlex
 import shutil
@@ -71,6 +72,10 @@ def _repo_root() -> Path:
 
 
 def _find_profile(value: str | None) -> Path:
+    value = value or os.environ.get("RLK_REPRO_PROFILE")
+    local_profile = _repo_root() / ".rlk-profile.json"
+    if not value and local_profile.is_file():
+        value = str(local_profile)
     if value:
         candidate = Path(value).expanduser()
         if candidate.is_file():
@@ -155,9 +160,7 @@ def resolve_paths(
         return _path(selected) or _required_path(default, profile_key)
 
     active_runtime = Path(sys.prefix).resolve()
-    runtime_path = choose(
-        runtime_root, "runtime_root", "RLK_REPRO_RUNTIME_ROOT", active_runtime
-    )
+    runtime_path = choose(runtime_root, "runtime_root", "RLK_REPRO_RUNTIME_ROOT", active_runtime)
     required_python = str(profile.get("requirements", {}).get("python", "3.11"))
     python_major_minor = ".".join(required_python.split(".")[:2])
     runtime_site_packages = runtime_path / f"lib/python{python_major_minor}/site-packages"
@@ -210,6 +213,7 @@ def resolve_paths(
         te_root=(
             _path(_override_or_env(te_root, "RLK_REPRO_TE_ROOT"))
             or _path(_profile_path(profile, f"te_root_{arm.lower()}"))
+            or _path(_profile_path(profile, "te_root"))
             or _path(
                 os.environ.get(str(profile.get("modes", {}).get(arm, {}).get("te_root_env", "")))
             )
@@ -274,6 +278,22 @@ def _gpu_names() -> list[str] | None:
     if result.returncode:
         return None
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _require_idle_gpus() -> None:
+    """Avoid submitting a colocated eight-GPU job over an existing workload."""
+    result = subprocess.run(
+        ["nvidia-smi", "--query-compute-apps=pid,used_memory", "--format=csv,noheader"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    if result.stdout.strip():
+        raise ReproError(
+            "GPUs have active compute processes; wait for them to finish before retrying. "
+            "PID and memory: " + result.stdout.strip().replace("\n", "; ")
+        )
 
 
 def _python_versions(python: Path) -> dict[str, str]:
@@ -371,7 +391,11 @@ def doctor(
             text=True,
             timeout=15,
         )
-        ray_detail = ray_status.stdout.strip() or ray_status.stderr.strip()
+        ray_detail = (
+            f"{ray_address} reachable"
+            if ray_status.returncode == 0
+            else (ray_status.stderr.strip() or ray_status.stdout.strip())[-1000:]
+        )
         add("ray_jobs_api", ray_status.returncode == 0, ray_detail or ray_address)
     except (OSError, subprocess.TimeoutExpired) as exc:
         add("ray_jobs_api", False, f"{ray_address}: {exc}")
@@ -404,6 +428,8 @@ def _arm_config(profile: dict[str, Any], arm: str) -> dict[str, Any]:
 
 def _validate_topology_args(args: argparse.Namespace) -> None:
     tp_size = int(args.tp_size)
+    if args.cp_size is None:
+        args.cp_size = 8 // tp_size if tp_size > 0 else 0
     cp_size = int(args.cp_size)
     rollout_tp_size = int(args.rollout_tp_size)
     rollout_cp_size = int(args.rollout_cp_size)
@@ -415,6 +441,11 @@ def _validate_topology_args(args: argparse.Namespace) -> None:
         raise ReproError("--tp-size must divide Qwen3-8B heads, query groups, and vocabulary")
     if 8 % (rollout_tp_size * rollout_cp_size):
         raise ReproError("--rollout-tp-size * --rollout-cp-size must divide 8 GPUs")
+    if rollout_cp_size != 1:
+        raise ReproError(
+            "This H100 profile uses vLLM 0.16 FlashAttention, which does not support "
+            "rollout CP > 1. Use --rollout-cp 1; training --cp remains configurable."
+        )
 
 
 def _example_root(rl_kernel_root: Path | None = None) -> Path:
@@ -494,7 +525,7 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
     vllm_gpu_memory_utilization = (
         float(args.vllm_gpu_memory_utilization)
         if args.vllm_gpu_memory_utilization is not None
-        else (0.2 if int(args.tp_size) == 1 else 0.4)
+        else (0.2 if int(args.tp_size) == 1 and int(args.rollout_tp_size) != 1 else 0.4)
     )
     command.extend(
         [
@@ -506,6 +537,24 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
             str(args.rollout_top_p),
         ]
     )
+    command.extend(
+        [
+            "--rollout-top-k",
+            str(args.rollout_top_k),
+            "--lr",
+            str(args.lr),
+            "--weight-decay",
+            str(args.weight_decay),
+        ]
+    )
+    if not math.isfinite(args.kl_coef) or args.kl_coef < 0:
+        raise ReproError("--kl-coef must be finite and nonnegative")
+    if args.kl_coef > 0:
+        command.extend(["--use-kl-loss", "--kl-loss-coef", str(args.kl_coef)])
+    if args.max_response_len is not None:
+        command.extend(["--max-response-len", str(args.max_response_len)])
+    if args.require_updates:
+        command.append("--require-updates")
     if args.ray_address:
         command.extend(["--ray-address", args.ray_address])
     if args.run_id:
@@ -643,23 +692,26 @@ def _resolved_paths(profile: dict[str, Any], args: argparse.Namespace) -> Paths:
         profile,
         workspace=values.get("workspace"),
         arm=canonical_arm(str(values.get("arm", "native"))),
-        **{key.replace("-", "_"): values.get(key.replace("-", "_")) for key in (
-            "rl-kernel-root",
-            "vime-root",
-            "megatron-root",
-            "runtime-root",
-            "cuda-runtime-root",
-            "runtime-site",
-            "cuda-python-site",
-            "te-root",
-            "data-root",
-            "model-root",
-            "ref-load",
-            "prompt-data",
-            "output-root",
-            "python",
-            "ray",
-        )},
+        **{
+            key.replace("-", "_"): values.get(key.replace("-", "_"))
+            for key in (
+                "rl-kernel-root",
+                "vime-root",
+                "megatron-root",
+                "runtime-root",
+                "cuda-runtime-root",
+                "runtime-site",
+                "cuda-python-site",
+                "te-root",
+                "data-root",
+                "model-root",
+                "ref-load",
+                "prompt-data",
+                "output-root",
+                "python",
+                "ray",
+            )
+        },
     )
 
 
@@ -716,12 +768,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="convert the configured local Qwen3-8B model to Megatron torch-dist",
     )
 
-    for command in ("plan", "run"):
+    for command in ("plan", "run", "verify"):
         command_parser = subparsers.add_parser(command, help=f"{command} one reproduction mode")
         _add_path_options(command_parser)
         command_parser.add_argument(
             "--mode",
-            default="native",
+            default="consistency",
             dest="arm",
             metavar="MODE",
             help="native (no rollout-logprob reuse) or consistency (RL-Kernel operators)",
@@ -730,31 +782,50 @@ def build_parser() -> argparse.ArgumentParser:
             "--arm", dest="arm", default=argparse.SUPPRESS, help=argparse.SUPPRESS
         )
         command_parser.add_argument(
-            "--rollouts", type=int, default=200, help="training/rollout steps (use 8 for smoke)"
+            "--rollouts",
+            "--steps",
+            type=int,
+            default=2 if command == "verify" else 200,
+            help="training/rollout steps (use 8 for smoke)",
         )
         command_parser.add_argument("--seed", type=int, default=1234)
         command_parser.add_argument("--rollout-seed", type=int, default=1234)
-        command_parser.add_argument("--tp-size", type=int, default=4)
-        command_parser.add_argument("--cp-size", type=int, default=2)
-        command_parser.add_argument("--rollout-tp-size", type=int, default=4)
-        command_parser.add_argument("--rollout-cp-size", type=int, default=1)
-        command_parser.add_argument("--rollout-temperature", type=float, default=1.0)
-        command_parser.add_argument("--rollout-top-p", type=float, default=1.0)
+        command_parser.add_argument("--tp-size", "--tp", type=int, default=4)
+        command_parser.add_argument(
+            "--cp-size", "--cp", type=int, default=None, help="training CP; defaults to 8 / TP"
+        )
+        command_parser.add_argument("--rollout-tp-size", "--rollout-tp", type=int, default=4)
+        command_parser.add_argument("--rollout-cp-size", "--rollout-cp", type=int, default=1)
+        command_parser.add_argument(
+            "--rollout-temperature", "--temperature", type=float, default=1.0
+        )
+        command_parser.add_argument("--rollout-top-p", "--top-p", type=float, default=1.0)
         command_parser.add_argument(
             "--vllm-gpu-memory-utilization",
             type=float,
             default=None,
-            help=(
-                "vLLM memory fraction; defaults to 0.2 for training TP1 "
-                "and 0.4 otherwise"
-            ),
+            help=("vLLM memory fraction; defaults to 0.2 for training TP1 and 0.4 otherwise"),
+        )
+        command_parser.add_argument("--rollout-top-k", "--top-k", type=int, default=-1)
+        command_parser.add_argument("--lr", type=float, default=5e-7)
+        command_parser.add_argument("--weight-decay", type=float, default=0.1)
+        command_parser.add_argument(
+            "--kl-coef", type=float, default=0.01 if command == "verify" else 0.0
+        )
+        command_parser.add_argument(
+            "--max-response-len", type=int, default=512 if command == "verify" else None
+        )
+        command_parser.add_argument(
+            "--require-updates", action="store_true", default=command == "verify"
         )
         command_parser.add_argument("--run-id", default=None)
         command_parser.add_argument(
             "--wait",
+            default=(command in {"run", "verify"}),
             action="store_true",
             help="stream until completion and save run.log plus ray-status.txt",
         )
+        command_parser.add_argument("--detach", dest="wait", action="store_false")
         command_parser.add_argument(
             "--allow-dirty",
             action="store_true",
@@ -800,26 +871,49 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         paths = _resolved_paths(profile, args)
         if args.command == "doctor":
-            return doctor(
-                paths, profile, ray_address=args.ray_address, as_json=args.as_json
-            )
+            return doctor(paths, profile, ray_address=args.ray_address, as_json=args.as_json)
         if args.command == "prepare":
             return prepare(paths, profile, args)
         if args.command == "plan":
             _print_plan(paths, profile, args)
             return 0
-        if args.command == "run":
+        if args.command in {"run", "verify"}:
+            command = _runner_command(paths, profile, args)
             preflight = doctor(paths, profile, ray_address=args.ray_address)
             if preflight:
                 print("Run aborted: fix the failed doctor checks first.", file=sys.stderr)
                 return preflight
-            command = _runner_command(paths, profile, args)
-            print("Executing:", " ".join(command))
+            if not args.dry_run:
+                _require_idle_gpus()
+            print(
+                f"Starting {canonical_arm(args.arm)}: training TP{args.tp_size}/CP{args.cp_size}, "
+                f"rollout TP{args.rollout_tp_size}, {args.rollouts} steps; "
+                f"temperature={args.rollout_temperature}, top-p={args.rollout_top_p}, "
+                f"top-k={args.rollout_top_k}",
+                flush=True,
+            )
             env = os.environ.copy()
             env["CUDNN_FRONTEND_CUDART_LIB_NAME"] = str(
                 paths.cuda_runtime_root / "lib/libcudart.so.12"
             )
-            return _run(command, env=env).returncode
+            if args.run_id is None:
+                args.run_id = (
+                    f"{canonical_arm(args.arm)}-tp{args.tp_size}cp{args.cp_size}-"
+                    + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+                )
+                command = _runner_command(paths, profile, args)
+            result = _run(command, env=env)
+            if result.returncode or not args.wait or args.dry_run:
+                return result.returncode
+            return _run(
+                [
+                    str(paths.python),
+                    str(_example_root() / "validate_run.py"),
+                    "--run-dir",
+                    str(paths.output_root / args.run_id),
+                ],
+                env=env,
+            ).returncode
         if args.command == "report":
             results_root = paths.data_root / "results"
             _run(

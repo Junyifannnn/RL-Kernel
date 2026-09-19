@@ -438,6 +438,57 @@ def _linear_dw(a: Tensor, grad_output: Tensor, *, disable_split_k: bool) -> Tens
         return torch.matmul(grad_output.t().contiguous(), a)
 
 
+
+def _canonical_tp_chunks(tp_world):
+    canonical = int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world)))
+    if canonical < tp_world or canonical % tp_world:
+        raise ValueError("canonical TP must be a positive multiple of physical TP")
+    chunks = canonical // tp_world
+    if chunks & (chunks - 1):
+        raise ValueError("canonical TP chunks must form a balanced binary tree")
+    return chunks
+
+
+def _canonical_tp_input_gradient(grad, weight, *, tp_world, column, disable_split_k):
+    chunks = _canonical_tp_chunks(tp_world)
+    if chunks == 1 or not disable_split_k:
+        return _linear_da(grad, weight, disable_split_k=disable_split_k)
+    axis = 0 if column else 1
+    if weight.size(axis) % chunks:
+        raise ValueError("FFN gradient shard does not divide canonical TP")
+    width = weight.size(axis) // chunks
+    parts = [
+        _linear_da(
+            grad.narrow(1, i * width, width).contiguous() if column else grad,
+            weight.narrow(axis, i * width, width).contiguous(),
+            disable_split_k=True,
+        ) for i in range(chunks)
+    ]
+    if not column:
+        return torch.cat(parts, dim=1)
+    while len(parts) > 1:
+        parts = [parts[i] + parts[i + 1] for i in range(0, len(parts), 2)]
+    return parts[0]
+
+
+def _canonical_tp_weight_gradient(a, grad, *, tp_world, column, disable_split_k):
+    chunks = _canonical_tp_chunks(tp_world)
+    if chunks == 1 or not disable_split_k:
+        return _linear_dw(a, grad, disable_split_k=disable_split_k)
+    sharded = grad if column else a
+    if sharded.size(1) % chunks:
+        raise ValueError("FFN weight gradient does not divide canonical TP")
+    width = sharded.size(1) // chunks
+    parts = [
+        _linear_dw(
+            a if column else a.narrow(1, i * width, width).contiguous(),
+            grad.narrow(1, i * width, width).contiguous() if column else grad,
+            disable_split_k=True,
+        ) for i in range(chunks)
+    ]
+    return torch.cat(parts, dim=0 if column else 1)
+
+
 def _require_parallel_group(group: Any, name: str):
     if group is None:
         return None
@@ -593,7 +644,8 @@ class _DeterministicFFNFunction(torch.autograd.Function):
         if sequence_parallel:
             rmsnorm_output_2d = _all_gather_tokens(rmsnorm_output_2d, tp_collective)
 
-        packed_gate_up = fused_gate_up_weight is not None and disable_split_k
+        packed_gate_up = (fused_gate_up_weight is not None and disable_split_k
+                          and _canonical_tp_chunks(tp_world) == 1)
         if packed_gate_up:
             assert fused_gate_up_weight is not None
             gate_up = _linear_fwd(
@@ -648,6 +700,7 @@ class _DeterministicFFNFunction(torch.autograd.Function):
                 down_weight,
             )
         ctx.input_shape = input_shape
+        ctx.tp_world = tp_world
         ctx.tp_collective = tp_collective
         ctx.cp_collective = cp_collective
         ctx.sequence_parallel = sequence_parallel
@@ -684,9 +737,10 @@ class _DeterministicFFNFunction(torch.autograd.Function):
             grad_output = _all_gather_tokens(grad_output, tp_collective)
 
         # Down input-gradient shards concatenate across TP; no TP reduction.
-        grad_activated = _linear_da(
+        grad_activated = _canonical_tp_input_gradient(
             grad_output,
             down_weight,
+            tp_world=ctx.tp_world, column=False,
             disable_split_k=disable_split_k,
         )
         if ctx.packed_gate_up:
@@ -713,47 +767,55 @@ class _DeterministicFFNFunction(torch.autograd.Function):
                 grad_up,
                 collective=cp_collective,
             )
-            grad_down_weight = _linear_dw(
+            grad_down_weight = _canonical_tp_weight_gradient(
                 activated_full,
                 grad_output_full,
+                tp_world=ctx.tp_world, column=False,
                 disable_split_k=disable_split_k,
             )
-            grad_gate_weight = _linear_dw(
+            grad_gate_weight = _canonical_tp_weight_gradient(
                 rmsnorm_full,
                 grad_gate_full,
+                tp_world=ctx.tp_world, column=True,
                 disable_split_k=disable_split_k,
             )
-            grad_up_weight = _linear_dw(
+            grad_up_weight = _canonical_tp_weight_gradient(
                 rmsnorm_full,
                 grad_up_full,
+                tp_world=ctx.tp_world, column=True,
                 disable_split_k=disable_split_k,
             )
         else:
-            grad_down_weight = _linear_dw(
+            grad_down_weight = _canonical_tp_weight_gradient(
                 activated,
                 grad_output,
+                tp_world=ctx.tp_world, column=False,
                 disable_split_k=disable_split_k,
             )
-            grad_gate_weight = _linear_dw(
+            grad_gate_weight = _canonical_tp_weight_gradient(
                 rmsnorm_output,
                 grad_gate,
+                tp_world=ctx.tp_world, column=True,
                 disable_split_k=disable_split_k,
             )
-            grad_up_weight = _linear_dw(
+            grad_up_weight = _canonical_tp_weight_gradient(
                 rmsnorm_output,
                 grad_up,
+                tp_world=ctx.tp_world, column=True,
                 disable_split_k=disable_split_k,
             )
 
         # Gate/Up input gradients reduce across TP, then add locally.
-        grad_rmsnorm_from_gate = _linear_da(
+        grad_rmsnorm_from_gate = _canonical_tp_input_gradient(
             grad_gate,
             gate_weight,
+            tp_world=ctx.tp_world, column=True,
             disable_split_k=disable_split_k,
         )
-        grad_rmsnorm_from_up = _linear_da(
+        grad_rmsnorm_from_up = _canonical_tp_input_gradient(
             grad_up,
             up_weight,
+            tp_world=ctx.tp_world, column=True,
             disable_split_k=disable_split_k,
         )
         if ctx.sequence_parallel:
