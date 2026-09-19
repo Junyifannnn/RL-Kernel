@@ -67,4 +67,13 @@ Use `./rlk plan` to inspect the fully expanded command before running.
 Each configuration's train/rollout equality is distinct from requiring
 identical training trajectories across different configurations: engine
 scheduling and random sampling can change the data even when logprob kernels
-are bitwise invariant.
+are bitwise invariant. Even with the same first-step tokens, changing training
+TP/CP can change backward reductions and the updated weight bytes. This launcher
+validates train/rollout logprob bytes within each run; it does not certify
+cross-configuration optimizer trajectories. In the two-step H100 checks, all
+responses were truncated and the nonzero gradients came from the KL term;
+longer training with nonzero reward advantages remains a separate validation.
+
+Train offload keeps IPC arenas in independent resident allocation pools. This
+also applies when the offload hook is currently disabled: the default allocator
+can still contain cached VMM blocks that cannot be exported as CUDA IPC handles.

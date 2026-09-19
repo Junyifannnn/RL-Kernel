@@ -1,11 +1,17 @@
 """Run with torchrun and the matching torch-memory-saver LD_PRELOAD library."""
 import os
+import sys
 
 import torch
 import torch.distributed as dist
 from torch_memory_saver import torch_memory_saver as saver
 
 from rl_engine.distributed.collectives import DeterministicCollective
+
+if "--with-vime" in sys.argv:
+    from vime.backends.megatron_utils.actor import _configure_train_offload
+
+    _configure_train_offload()
 
 rank = int(os.environ["LOCAL_RANK"])
 torch.cuda.set_device(rank)
