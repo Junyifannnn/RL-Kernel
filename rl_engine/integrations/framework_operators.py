@@ -290,12 +290,8 @@ def _fused_rms_norm_input(
     if bool(getattr(projection, "zero_centered_gamma", False)):
         raise RuntimeError(f"strict {name} does not support zero-centered gamma")
     eps = float(getattr(projection, "eps"))
-    return torch.nn.functional.rms_norm(
-        hidden_states,
-        (hidden_states.shape[-1],),
-        weight,
-        eps,
-    )
+    from rl_engine.integrations.canonical_cp import rms_norm
+    return rms_norm(hidden_states, weight, eps)
 
 
 def _split_gate_up(weight: torch.Tensor, name: str) -> tuple[torch.Tensor, torch.Tensor]:

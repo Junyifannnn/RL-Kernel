@@ -26,8 +26,11 @@ counts and CUDA Graph batch sizes are derived from the chosen topology.
 Rollout CP is prefill context parallelism and is passed to vLLM's
 `ParallelConfig.prefill_context_parallel_size`; decode remains TP-only. The
 per-engine GPU count is `rollout TP * rollout CP`, so that product must divide
-the eight rollout GPUs. This requires the companion VIME/vLLM integration that
-ships with this profile and should be validated on the target runtime. The launcher also rejects
+the eight rollout GPUs. **Rollout CP > 1 currently fails on the pinned vLLM
+0.16.0 runtime**: an actual TP4/CP2 rollout launch stopped with
+`RlKernelAttentionImpl does not support PCP`. Parameter forwarding does not
+implement token partitioning, distributed KV cache, or attention merging.
+Use rollout CP1 for the validated path. The launcher also rejects
 submission while GPUs have existing compute processes; it cannot reserve
 the GPUs against other users starting a process later.
 When both training TP and rollout TP are 1, the launcher offloads the training
@@ -60,8 +63,9 @@ the longer existing flag names remain accepted.
 Validation checks include the complete expected step sequence, successful Ray
 termination, finite training metrics, exact policy/rollout logprobs, and
 sidecar sample/token coverage. `verify` additionally requires a nonzero
-gradient, positive learning rates and changed bytes in an exported weight
-tensor across versions. A one-step run cannot satisfy that update check.
+gradient, positive learning rates and changed exported weights across versions.
+The audit fingerprints all exported parameter tensors, including norms and
+embeddings. A one-step run cannot satisfy that update check.
 
 Results are stored under the configured output root in an append-only run
 directory, with `manifest.json`, `run.log`, `ray-status.txt`,
@@ -78,6 +82,12 @@ validates train/rollout logprob bytes within each run; it does not certify
 cross-configuration optimizer trajectories. In the two-step H100 checks, all
 responses were truncated and the nonzero gradients came from the KL term;
 longer training with nonzero reward advantages remains a separate validation.
+
+The [canonical CP backward follow-up](h100-cp-gradient-validation.md) closes
+the observed TP2/CP4 versus TP4/CP2 discrepancy for two real update steps:
+both gradient norms, all 399 exported parameters after each update, and
+sampled tokens are identical. This is a measured pair with rollout TP4/CP1,
+temperature 0.7 and top-p 0.95, not an exhaustive topology/sampling guarantee.
 
 Train offload keeps IPC arenas in independent resident allocation pools. This
 also applies when the offload hook is currently disabled: the default allocator

@@ -8,6 +8,11 @@ between CUDA and ROCm hardware. No training or GPU test was rerun for this audit
 The integrated source has CPU regression checks; the GPU evidence below predates
 the merge and must not be presented as a GPU validation of the merged revision.
 
+Subsequent GPU work is recorded separately in the
+[H100 CP backward follow-up](h100-cp-gradient-validation.md): the original
+TP2/CP4 versus TP4/CP2 pair now has zero observed update/norm differences,
+while the actual rollout CP2 launch failed at backend initialization.
+
 ## Common command
 
 Configure `.rlk-profile.json` once in each checkout, including its runtime Python,
@@ -44,7 +49,7 @@ Ray setup and framework versions remain different.
 | Mixed per-request temperatures | Rollout adapter handles row values; full-model tests use one value per run | Strict scoring uses the configured run temperature; heterogeneous requests not certified |
 | Training TP/CP | `(1,8),(2,4),(4,2),(8,1)` | Same factorizations |
 | Independent rollout TP | 1/2/4/8 | 1/2/4/8 |
-| Rollout CP > 1 | Wired as vLLM prefill CP; target-runtime validation required | Wired through the same VIME PCP adapter; target-runtime validation required |
+| Rollout CP > 1 | Actual TP4/CP2 launch failed: `RlKernelAttentionImpl does not support PCP` on vLLM 0.16.0 | Parameter forwarding only; actual PCP implementation and validation remain missing |
 | `verify` with real weight-update acceptance | Supported, two steps by default | Not implemented; explicit error |
 | `run` and `plan` | Shared interface | Shared interface |
 | `--detach`, `--allow-dirty`, standalone prepare/doctor/validate/report | CUDA path | Not shared; explicit errors for unsupported options/commands |
@@ -78,11 +83,13 @@ into the training score; ROCm replays support membership, then recomputes scores
 
 ## Remaining gaps
 
-1. **Cross-configuration backward/optimizer bitwise equality is not achieved.**
+1. **General cross-configuration backward/optimizer coverage remains incomplete.**
    On H100, TP2/CP4 and TP4/CP2 had the same initial audited weights, tokens,
    masks and rewards, but gradient norms differed by 0.021213% and the first
-   updated audited weight hashes differed. ROCm has no corresponding optimizer
-   trajectory proof. This is a confirmed gap, not merely missing test coverage.
+   updated audited weight hashes differed. The follow-up fixes and verifies
+   this pair over two updates, comparing every exported parameter. It does not
+   certify all topologies, microbatch packings or sampling parameters. ROCm has
+   no corresponding optimizer trajectory proof for this change.
 2. No exhaustive Cartesian topology × temperature × top-p matrix and no new
    200-step validation of the configurable implementation or merged revision.
    ROCm top-k, greedy and the update-verification contract remain unsupported.

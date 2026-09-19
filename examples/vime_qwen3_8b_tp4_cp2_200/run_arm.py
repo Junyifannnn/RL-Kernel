@@ -527,6 +527,9 @@ def main(argv: list[str] | None = None) -> int:
         "RL_KERNEL_VLLM_CUDAGRAPH_MAX_CAPTURE_SIZE": str(max_engine_decode_batch),
         "RL_KERNEL_SEED": str(args.seed),
         "RL_KERNEL_ROLLOUT_SEED": str(args.rollout_seed),
+        "RL_KERNEL_CANONICAL_CP_GRAD": "1" if all(
+            case == "R/R" for case in (arm.attention_case, arm.ffn_case, arm.logp_case)
+        ) else "0",
         "RL_KERNEL_RUN_ID": run_id,
     }
     if os.environ.get("CUDNN_FRONTEND_CUDART_LIB_NAME"):

@@ -1,8 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (c) 2026 RL-Kernel Contributors
-
-"""Record actual exported tensor bytes before the rollout engine reloads them."""
-
+"""Audit every exported parameter, not a sampled tensor."""
 import hashlib
 import json
 import os
@@ -13,33 +10,24 @@ def record_weight_update(args, version_dir, rollout_engines):
     import torch
     import torch.distributed as dist
     from safetensors import safe_open
-
     if dist.is_initialized() and dist.get_rank() != 0:
         return
     root = Path(version_dir)
-    name = "model.layers.0.mlp.down_proj.weight"
-    index = root / "model.safetensors.index.json"
-    if index.is_file():
-        mapping = json.loads(index.read_text())["weight_map"]
-        files = [root / mapping[name]]
-    else:
-        files = sorted(root.glob("*.safetensors"))
-    digest = None
-    for file in files:
-        with safe_open(file, framework="pt", device="cpu") as archive:
-            if name in archive.keys():
+    tensors = {}
+    for file in sorted(root.glob('*.safetensors')):
+        with safe_open(file, framework='pt', device='cpu') as archive:
+            for name in archive.keys():
                 tensor = archive.get_tensor(name).contiguous()
-                digest = hashlib.sha256(tensor.view(torch.uint8).numpy().tobytes()).hexdigest()
-                break
-    if digest is None:
-        raise RuntimeError(f"weight update audit could not find {name} in {root}")
-    output = Path(os.environ["RL_KERNEL_WEIGHT_AUDIT_DIR"])
+                tensors[name] = {
+                    'sha256': hashlib.sha256(memoryview(tensor.view(torch.uint8).numpy())).hexdigest(),
+                    'shape': list(tensor.shape), 'dtype': str(tensor.dtype),
+                }
+    if not tensors:
+        raise RuntimeError(f'No tensors to audit in {root}')
+    digest = hashlib.sha256(json.dumps(tensors, sort_keys=True).encode()).hexdigest()
+    output = Path(os.environ['RL_KERNEL_WEIGHT_AUDIT_DIR'])
     output.mkdir(parents=True, exist_ok=True)
-    record = {
-        "version": root.name,
-        "tensor": name,
-        "sha256": digest,
-        "shape": list(tensor.shape),
-        "dtype": str(tensor.dtype),
-    }
-    (output / f"{root.name}.json").write_text(json.dumps(record, indent=2) + "\n")
+    (output / f'{root.name}.json').write_text(json.dumps({
+        'version': root.name, 'scope': 'all_exported_parameters',
+        'sha256': digest, 'tensor_count': len(tensors), 'tensors': tensors,
+    }, indent=2)+'\n')

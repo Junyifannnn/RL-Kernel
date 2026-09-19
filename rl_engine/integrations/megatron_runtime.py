@@ -16,6 +16,7 @@ from typing import Any
 import torch
 
 from rl_engine.integrations.ablation import Implementation, IntegrationPlan
+from rl_engine.integrations import canonical_cp
 from rl_engine.integrations.framework_operators import (
     _MEGATRON_TP_OUTPUT_PROJECTION_COLLECTIVE_ATTR,
     _MEGATRON_TP_QKV_DGRAD_COLLECTIVE_ATTR,
@@ -528,6 +529,7 @@ class _CanonicalColumnProjection(torch.autograd.Function):
     def forward(ctx, input_2d, weight, linear, tp_world):
         ctx.save_for_backward(input_2d, weight)
         ctx.tp_world = tp_world
+        ctx.cp_layout = canonical_cp.current_layout()
         return linear(input_2d, weight)
 
     @staticmethod
@@ -541,8 +543,10 @@ class _CanonicalColumnProjection(torch.autograd.Function):
             if ctx.needs_input_grad[0] else None
         )
         grad_weight = (
-            det_gemm_linear_weight_gradient(input_2d, grad_output)
-            if ctx.needs_input_grad[1] else None
+            canonical_cp.weight_gradient(
+                input_2d, grad_output, ctx.cp_layout,
+                chunks=int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(ctx.tp_world))) // ctx.tp_world,
+            ) if ctx.needs_input_grad[1] else None
         )
         return grad_input, grad_weight, None, None
 
@@ -577,6 +581,7 @@ class _DeterministicTPOutputProjection(torch.autograd.Function):
         ctx.bias_dtype = None if bias is None else bias.dtype
         ctx.has_bias = bias is not None
         ctx.tp_group = tp_group
+        ctx.cp_layout = canonical_cp.current_layout()
         if ctx.batch_major:
             return (
                 output_2d.reshape(input_value.shape[1], input_value.shape[0], weight.size(0))
@@ -615,7 +620,11 @@ class _DeterministicTPOutputProjection(torch.autograd.Function):
                 grad_input = grad_input.reshape(ctx.input_shape)
             grad_input = grad_input.to(ctx.input_dtype)
         if ctx.needs_input_grad[1]:
-            grad_weight = det_gemm_linear_weight_gradient(input_2d, dlogits).to(ctx.weight_dtype)
+            tp_world = _tp_world_size(ctx.tp_group)
+            grad_weight = canonical_cp.weight_gradient(
+                input_2d, dlogits, ctx.cp_layout,
+                chunks=int(os.getenv("RL_KERNEL_STRICT_CANONICAL_TP", str(tp_world))) // tp_world,
+            ).to(ctx.weight_dtype)
         if ctx.has_bias and ctx.needs_input_grad[2]:
             grad_bias = dlogits.float().sum(dim=0).to(ctx.bias_dtype)
         return grad_input, grad_weight, grad_bias, None
@@ -711,6 +720,8 @@ def _patch_strict_attention_projections(
         output_2d = (
             _CanonicalColumnProjection.apply(input_2d, weight, linear, column_tp_world)
             if column_tp_world is not None
+            else canonical_cp.CPRowLinear.apply(input_2d, weight, linear, canonical_cp.current_layout())
+            if canonical_cp.current_layout() is not None
             else linear(input_2d, weight)
         )
         output = output_2d.reshape(*input_value.shape[:-1], weight.shape[0])
@@ -865,6 +876,10 @@ def _patch_strict_attention_projections(
 
     def attention_init_wrapped(instance: Any, *args: Any, **kwargs: Any) -> None:
         attention_init(instance, *args, **kwargs)
+        for norm_name in ("q_layernorm", "k_layernorm"):
+            norm = getattr(instance, norm_name, None)
+            if norm is not None:
+                norm._rlk_sharded_heads = True
         qkv = instance.linear_qkv
         projection = instance.linear_proj
         core_attention = getattr(instance, "core_attention", None)
@@ -980,11 +995,9 @@ def _patch_strict_te_rms_norm(rms_norm_cls: type[Any] | None = None) -> None:
             raise RuntimeError("strict TE RMSNorm does not accept extra forward arguments")
         if bool(getattr(instance, "zero_centered_gamma", False)):
             raise RuntimeError("strict TE RMSNorm does not support zero-centered gamma")
-        return torch.nn.functional.rms_norm(
-            input_value,
-            (input_value.shape[-1],),
-            instance.weight,
-            float(instance.eps),
+        return canonical_cp.rms_norm(
+            input_value, instance.weight, float(instance.eps),
+            sharded_heads=bool(getattr(instance, "_rlk_sharded_heads", False)),
         )
 
     setattr(rms_norm_cls, _STRICT_TE_RMS_NORM_PATCH_MARKER, original)
@@ -1135,6 +1148,8 @@ def initialize_from_environment(_args: Any = None) -> MegatronIntegration:
     integration = install_megatron_integration(plan)
     if plan.implementation_for("attention", "training") is Implementation.RL_KERNEL:
         _precompile_strict_attention_training(_args)
+    if os.getenv("RL_KERNEL_CANONICAL_CP_GRAD", "0") == "1":
+        canonical_cp.install()
     return integration
 
 

@@ -276,8 +276,12 @@ see the audit for the explicit command differences.
 On this eight-GPU Qwen3-8B setup, training `(TP, CP)` can be `(1,8)`, `(2,4)`,
 `(4,2)` or `(8,1)`; rollout TP can be 1, 2, 4 or 8. The finer training/rollout TP
 defines canonical shards. The padded vocabulary remains 152064 for every TP.
-Rollout CP is supported as vLLM prefill context parallelism through
-`ParallelConfig.prefill_context_parallel_size`; decode remains TP-only. The
+Rollout CP is forwarded as vLLM prefill context parallelism through
+`ParallelConfig.prefill_context_parallel_size`; this does not implement PCP.
+The H100 vLLM 0.16.0 rollout TP4/CP2 test failed because
+`RlKernelAttentionImpl does not support PCP`; ROCm PCP is also unvalidated.
+See the [actual follow-up results](h100-cp-gradient-validation.md).
+Decode remains TP-only. The
 per-engine GPU count is rollout TP × rollout CP and must divide the available
 rollout GPUs. PP/EP and sequence parallelism are outside this runner's scope.
 

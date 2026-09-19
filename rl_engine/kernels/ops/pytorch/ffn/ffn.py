@@ -735,6 +735,8 @@ class _DeterministicFFNFunction(torch.autograd.Function):
         ctx.input_shape = input_shape
         ctx.tp_world = tp_world
         ctx.tp_collective = tp_collective
+        from rl_engine.integrations.canonical_cp import current_layout
+        ctx.cp_layout = current_layout()
         ctx.cp_collective = cp_collective
         ctx.sequence_parallel = sequence_parallel
         ctx.disable_split_k = disable_split_k
@@ -785,14 +787,15 @@ class _DeterministicFFNFunction(torch.autograd.Function):
         # CP=1. These payloads become available before any weight-gradient GEMM,
         # so one rank-ordered gather preserves the arithmetic contract while
         # avoiding four redundant collective handshakes per layer.
-        if cp_collective is not None:
+        if cp_collective is not None or ctx.cp_layout is not None:
+            gather = (lambda *values, **kw: values) if cp_collective is None else _all_gather_packed_tokens
             (
                 activated_full,
                 grad_output_full,
                 rmsnorm_full,
                 grad_gate_full,
                 grad_up_full,
-            ) = _all_gather_packed_tokens(
+            ) = gather(
                 activated,
                 grad_output,
                 rmsnorm_output,
@@ -800,6 +803,11 @@ class _DeterministicFFNFunction(torch.autograd.Function):
                 grad_up,
                 collective=cp_collective,
             )
+            if ctx.cp_layout is not None:
+                activated_full, grad_output_full, rmsnorm_full, grad_gate_full, grad_up_full = (
+                    ctx.cp_layout.ordered(value) for value in
+                    (activated_full, grad_output_full, rmsnorm_full, grad_gate_full, grad_up_full)
+                )
             grad_down_weight = _canonical_tp_weight_gradient(
                 activated_full,
                 grad_output_full,
