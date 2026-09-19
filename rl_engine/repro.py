@@ -447,8 +447,8 @@ def _validate_topology_args(args: argparse.Namespace) -> None:
         raise ReproError("--rollout-tp-size * --rollout-cp-size must divide 8 GPUs")
     if rollout_cp_size != 1:
         raise ReproError(
-            "The supported CUDA/ROCm rollout adapters require --rollout-cp 1; "
-            "training --cp remains configurable."
+            "The supported CUDA/ROCm rollout adapters do not support rollout CP > 1; "
+            "use --rollout-cp 1. Training --cp remains configurable."
         )
 
 
