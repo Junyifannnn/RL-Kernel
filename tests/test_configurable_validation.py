@@ -9,6 +9,7 @@ import examples.vime_qwen3_8b_tp4_cp2_200.validate_run as validator
 import examples.vime_rocm_attention_ablation.validate_artifacts as artifacts
 from examples.vime_qwen3_8b_tp4_cp2_200.run_arm import _rollout_topology
 import rl_engine.repro as repro
+from rl_engine.integrations.framework_operators import _MegatronCPWeightGradient
 from rl_engine.repro import build_parser, _runner_command, _resolved_paths
 import rl_engine.kernels.ops.pytorch.ffn.ffn as ffn
 
@@ -169,3 +170,21 @@ def test_bitwise_gate_rejects_signed_zero_difference(tmp_path):
     assert result["torch_equal"]
     assert result["bitwise_mismatch_count"] == 1
     assert not result["passed"]
+
+
+@pytest.mark.parametrize("cp", [1, 2, 4, 8])
+def test_megatron_cp_reduction_does_not_multiply_complete_ffn_gradient(cp):
+    # A strict FFN weight GEMM sees the complete gathered CP token sequence.
+    # Reproduce VIME's CP loss multiplier and Megatron's average reduction.
+    x = torch.arange(24, dtype=torch.float64).reshape(8, 3)
+    initial = torch.arange(6, dtype=torch.float64).reshape(2, 3)
+    reference = initial.clone().requires_grad_()
+    (x @ reference.T).square().sum().backward()
+    rank_grads = []
+    for _ in range(cp):
+        weight = initial.clone().requires_grad_()
+        adjusted = _MegatronCPWeightGradient.apply(weight, cp)
+        (cp * (x @ adjusted.T).square().sum()).backward()
+        rank_grads.append(weight.grad)
+    ddp_gradient = torch.stack(rank_grads).mean(0)
+    assert torch.equal(ddp_gradient, reference.grad)

@@ -777,6 +777,24 @@ class MegatronAttentionOperator:
         return output
 
 
+class _MegatronCPWeightGradient(torch.autograd.Function):
+    """Cancel the extra CP replica count before Megatron reduces parameter grads.
+
+    The strict FFN gathers all CP tokens for its weight-gradient GEMMs, so
+    each CP rank already has the complete gradient. Megatron still performs
+    its normal DP/CP reduction; its loss scaling assumes rank-local grads.
+    """
+
+    @staticmethod
+    def forward(ctx, weight, cp_world):
+        ctx.cp_world = cp_world
+        return weight
+
+    @staticmethod
+    def backward(ctx, grad):
+        return grad / ctx.cp_world, None
+
+
 class MegatronFFNOperator:
     backend_id = FFN_BACKEND_ID
 
@@ -828,10 +846,13 @@ class MegatronFFNOperator:
             "linear_fc1",
         )
         fused_gate_up = _weight(module.linear_fc1, "linear_fc1").contiguous()
-        gate, up = _split_gate_up(fused_gate_up, "linear_fc1")
         down = _weight(module.linear_fc2, "linear_fc2").contiguous()
         parallel_state = _megatron_parallel_state()
         cp_world = int(parallel_state.get_context_parallel_world_size())
+        if cp_world > 1 and torch.is_grad_enabled():
+            fused_gate_up = _MegatronCPWeightGradient.apply(fused_gate_up, cp_world)
+            down = _MegatronCPWeightGradient.apply(down, cp_world)
+        gate, up = _split_gate_up(fused_gate_up, "linear_fc1")
         tp_world = int(parallel_state.get_tensor_model_parallel_world_size())
         cp_group = parallel_state.get_context_parallel_group() if cp_world > 1 else None
         operator = self._handle.get(

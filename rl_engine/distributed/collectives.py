@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import socket
+import sys
 import threading
 from collections.abc import Iterable
+from contextlib import nullcontext
 from types import TracebackType
 from typing import Any
 
@@ -23,6 +25,18 @@ _COLLECTIVES: dict[tuple[int, int, int, int], Any] = {}
 DETERMINISTIC_ALL_REDUCE_OP = "rl_kernel::deterministic_all_reduce_"
 DETERMINISTIC_STAGING_RESERVE_OP = "rl_kernel::deterministic_staging_reserve_"
 DETERMINISTIC_STAGED_ALL_REDUCE_OP = "rl_kernel::deterministic_staged_all_reduce"
+
+
+def _ipc_allocation_context():
+    """IPC handles require resident cudaMalloc storage, not offloadable VMM."""
+    module = sys.modules.get("torch_memory_saver")
+    saver = getattr(module, "torch_memory_saver", None)
+    impl = getattr(saver, "_impl", None)
+    binary = getattr(impl, "_binary_wrapper", None)
+    active = getattr(getattr(binary, "cdll", None), "tms_get_interesting_region", None)
+    if callable(active) and active():
+        return saver.disable()
+    return nullcontext()
 
 
 @torch.library.custom_op(DETERMINISTIC_ALL_REDUCE_OP, mutates_args={"input"})
@@ -279,6 +293,10 @@ class DeterministicCollective:
         self._extension = _C_npu
 
     def _create_cuda_state(self) -> None:
+        with _ipc_allocation_context():
+            self._create_cuda_ipc_state()
+
+    def _create_cuda_ipc_state(self) -> None:
         self._lock = threading.Lock()
         self._handle = 0
         self._validated_signatures: set[tuple[Any, ...]] = set()
