@@ -1,0 +1,13 @@
+{
+  "vime": {
+    "repository": "https://github.com/RL-Align/vime.git",
+    "base": "1a113710e80aa7cfc271caa9bd90bcf348a7af08",
+    "tested_commit": "7ec5c0f0889ca6db742041dcd95f0fa1364c11a7",
+    "sha256": "5b0a9a56f91ff9c27fa3cebbd94a728b020268e9b10f52b6074e0732997da66c"
+  },
+  "megatron": {
+    "repository": "https://github.com/NVIDIA/Megatron-LM.git",
+    "tested_commit": "1dcf0dafa884ad52ffb243625717a3471643e087",
+    "modified": false
+  }
+}

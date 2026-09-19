@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -107,6 +108,7 @@ def _rollout_topology(
             f"rollout GPU count ({gpus_per_engine} does not divide {rollout_gpus})"
         )
     topology = dict(TOPOLOGY)
+    topology["offload_train"] = tensor_parallel_size == 1 and rollout_tp_size == 1
     topology["tp"] = tensor_parallel_size
     topology["cp"] = context_parallel_size
     topology["rollout_tp"] = rollout_tp_size
@@ -351,6 +353,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--rollout-temperature", type=float, default=1.0)
     parser.add_argument("--rollout-top-p", type=float, default=1.0)
+    parser.add_argument("--rollout-top-k", type=int, default=-1)
+    parser.add_argument("--lr", type=float, default=5e-7)
+    parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--require-updates", action="store_true")
     parser.add_argument(
         "--use-kl-loss",
         action="store_true",
@@ -394,10 +400,25 @@ def main(argv: list[str] | None = None) -> int:
     args.group = LEGACY_GROUP_ALIASES.get(args.group, args.group)
     if args.num_rollout <= 0:
         raise ValueError("--num-rollout must be positive")
-    if args.rollout_temperature <= 0.0:
-        raise ValueError("--rollout-temperature must be positive")
+    if not math.isfinite(args.rollout_temperature) or args.rollout_temperature < 0.0:
+        raise ValueError("--rollout-temperature must be finite and nonnegative")
     if not 0.0 < args.rollout_top_p <= 1.0:
         raise ValueError("--rollout-top-p must be in (0, 1]")
+    if args.rollout_top_k != -1 and not 1 <= args.rollout_top_k <= 151936:
+        raise ValueError("--rollout-top-k must be -1 or in [1, real vocabulary size]")
+    if not math.isfinite(args.lr) or args.lr <= 0:
+        raise ValueError("--lr must be finite and positive")
+    if not math.isfinite(args.weight_decay) or args.weight_decay < 0:
+        raise ValueError("--weight-decay must be finite and nonnegative")
+    if not math.isfinite(args.kl_loss_coef) or args.kl_loss_coef < 0:
+        raise ValueError("--kl-loss-coef must be finite and nonnegative")
+    if args.rollout_cp_size != 1:
+        raise ValueError(
+            "vLLM 0.16 FlashAttention does not support rollout CP > 1 in this profile; "
+            "use --rollout-cp-size 1. Training CP is independent and configurable."
+        )
+    if args.require_updates and args.num_rollout < 2:
+        raise ValueError("--require-updates needs at least two rollouts to check weight resync")
     trajectories_per_rollout = args.rollout_batch_size * args.n_samples_per_prompt
     if args.global_batch_size != trajectories_per_rollout:
         raise ValueError(
@@ -420,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     vllm_gpu_memory_utilization = (
         float(args.vllm_gpu_memory_utilization)
         if args.vllm_gpu_memory_utilization is not None
-        else (0.2 if int(topology["tp"]) == 1 else 0.4)
+        else (0.2 if int(topology["tp"]) == 1 and int(topology["rollout_tp"]) != 1 else 0.4)
     )
     if not 0.0 < vllm_gpu_memory_utilization < 1.0:
         raise ValueError("--vllm-gpu-memory-utilization must be between 0 and 1")
@@ -474,7 +495,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     canonical_tp = max(int(topology["tp"]), int(topology["rollout_tp"]))
     vocab_alignment = 128 * canonical_tp
-    canonical_vocab_size = ((151936 + vocab_alignment - 1) // vocab_alignment) * vocab_alignment
+    canonical_vocab_size = ((152064 + vocab_alignment - 1) // vocab_alignment) * vocab_alignment
     env_vars = {
         "RL_KERNEL_ROOT": str(rl_kernel_root),
         "RL_KERNEL_REAL_PYTHON": str(python),
@@ -491,6 +512,7 @@ def main(argv: list[str] | None = None) -> int:
         "RL_KERNEL_VLLM_INTEGRATION": "1",
         "RL_KERNEL_CUDA_ONLY": "1",
         "VIME_RL_KERNEL_STRICT": "1",
+        "RL_KERNEL_COMPLETE_SAMPLING_SUPPORT": "1",
         "RL_KERNEL_ATTENTION_CASE": arm.attention_case,
         "RL_KERNEL_FFN_CASE": arm.ffn_case,
         "RL_KERNEL_LOGP_CASE": arm.logp_case,
@@ -501,6 +523,7 @@ def main(argv: list[str] | None = None) -> int:
         "RL_KERNEL_STRICT_CANONICAL_VOCAB_SIZE": str(canonical_vocab_size),
         "RL_KERNEL_READBACK_DIR": str(run_dir / "readbacks"),
         "RL_KERNEL_MISMATCH_SIDECAR_DIR": str(run_dir / "mismatch-sidecars"),
+        "RL_KERNEL_WEIGHT_AUDIT_DIR": str(run_dir / "weight-audit"),
         "RL_KERNEL_VLLM_REAL_VOCAB_SIZE": "151936",
         "RL_KERNEL_VLLM_PADDED_VOCAB_SIZE": "152064",
         "RL_KERNEL_VLLM_TEMPERATURE": str(args.rollout_temperature),
@@ -524,7 +547,7 @@ def main(argv: list[str] | None = None) -> int:
         "--rollout-num-gpus",
         str(topology["rollout_gpus"]),
         "--colocate",
-        "--no-offload-train",
+        "--offload-train" if topology["offload_train"] else "--no-offload-train",
         "--offload-rollout",
         *MODEL_ARGS,
         "--hf-checkpoint",
@@ -557,6 +580,14 @@ def main(argv: list[str] | None = None) -> int:
         str(args.rollout_temperature),
         "--rollout-top-p",
         str(args.rollout_top_p),
+        "--rollout-top-k", str(args.rollout_top_k),
+        "--optimizer", "adam",
+        "--lr", str(args.lr),
+        "--lr-decay-style", "constant",
+        "--weight-decay", str(args.weight_decay),
+        "--adam-beta1", "0.9",
+        "--adam-beta2", "0.98",
+        "--entropy-coef", "0",
         "--global-batch-size",
         str(args.global_batch_size),
         "--balance-data",
@@ -613,10 +644,15 @@ def main(argv: list[str] | None = None) -> int:
         str(topology["rollout_cp"]),
         "--vllm-gpu-memory-utilization",
         str(vllm_gpu_memory_utilization),
+        "--vllm-logprobs-mode",
+        "processed_logprobs",
         *_mismatch_metrics_args(),
     ]
     if arm.framework_use_rollout_logprobs:
         train_command.append("--use-rollout-logprobs")
+    if args.require_updates:
+        train_command.extend(["--custom-update-weight-post-write-path",
+                              "vime_qwen3_8b_tp4_cp2_200.weight_audit.record_weight_update"])
     if args.use_kl_loss:
         train_command.extend(["--use-kl-loss", "--kl-loss-coef", str(args.kl_loss_coef)])
     if {arm.attention_case, arm.ffn_case, arm.logp_case} == {"R/R"}:
@@ -669,13 +705,18 @@ def main(argv: list[str] | None = None) -> int:
         "sampling": {
             "temperature": args.rollout_temperature,
             "top_p": args.rollout_top_p,
+            "top_k": args.rollout_top_k,
+            "support": "complete_recomputed",
         },
         "algorithm": {
+            "optimizer": {"name": "adam", "lr": args.lr, "weight_decay": args.weight_decay},
+            "require_updates": args.require_updates,
             "advantage_estimator": "grpo",
             "reward_model": "deepscaler",
             "reference_model": {
                 "enabled": args.use_kl_loss,
                 "mode": "kl_loss" if args.use_kl_loss else None,
+                "distribution": "full_vocabulary_temperature_scaled",
                 "coefficient": args.kl_loss_coef,
             },
         },
