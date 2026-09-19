@@ -31,6 +31,9 @@ the GPUs against other users starting a process later.
 When both training TP and rollout TP are 1, the launcher offloads the training
 state during rollout to fit the model, optimizer and KV cache on 80 GB GPUs.
 This memory tradeoff is recorded in the manifest and affects throughput.
+Training TP1 also uses a smaller microbatch token budget (128 per CP rank),
+so activation memory leaves room for Adam states after the first update.
+Override it with `--max-tokens-per-gpu`; global batch size remains unchanged.
 
 `--temperature` accepts finite nonnegative values; zero selects greedy
 sampling. `--top-p` accepts `(0, 1]`. `--top-k` accepts `-1` (disabled) or a

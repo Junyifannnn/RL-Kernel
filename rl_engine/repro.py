@@ -522,6 +522,12 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         command.extend(["--extra-pythonpath", str(extra_pythonpath)])
     for item in profile.get("runner_args", []):
         command.extend([str(part) for part in item])
+    max_tokens_per_gpu = args.max_tokens_per_gpu
+    if max_tokens_per_gpu is None:
+        max_tokens_per_gpu = 128 if int(args.tp_size) == 1 else 4096
+    if max_tokens_per_gpu <= 0:
+        raise ReproError("--max-tokens-per-gpu must be positive")
+    command.extend(["--max-tokens-per-gpu", str(max_tokens_per_gpu)])
     vllm_gpu_memory_utilization = (
         float(args.vllm_gpu_memory_utilization)
         if args.vllm_gpu_memory_utilization is not None
@@ -807,6 +813,10 @@ def build_parser() -> argparse.ArgumentParser:
             help=("vLLM memory fraction; defaults to 0.2 for training TP1 and 0.4 otherwise"),
         )
         command_parser.add_argument("--rollout-top-k", "--top-k", type=int, default=-1)
+        command_parser.add_argument(
+            "--max-tokens-per-gpu", type=int, default=None,
+            help="training microbatch token budget per CP rank; defaults to 128 for TP1 and 4096 otherwise",
+        )
         command_parser.add_argument("--lr", type=float, default=5e-7)
         command_parser.add_argument("--weight-decay", type=float, default=0.1)
         command_parser.add_argument(
