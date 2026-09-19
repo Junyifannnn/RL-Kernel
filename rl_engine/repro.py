@@ -445,11 +445,9 @@ def _validate_topology_args(args: argparse.Namespace) -> None:
         raise ReproError("--tp-size must divide Qwen3-8B heads, query groups, and vocabulary")
     if 8 % (rollout_tp_size * rollout_cp_size):
         raise ReproError("--rollout-tp-size * --rollout-cp-size must divide 8 GPUs")
-    if rollout_cp_size != 1:
-        raise ReproError(
-            "This configuration does not support rollout CP > 1; "
-            "use --rollout-cp 1. Training --cp remains configurable."
-        )
+    # vLLM exposes prefill context parallelism separately from decode TP.
+    # The VIME companion adapter forwards this as
+    # ParallelConfig.prefill_context_parallel_size.
 
 
 def _example_root(rl_kernel_root: Path | None = None) -> Path:
@@ -486,8 +484,8 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         raise ReproError("--vllm-gpu-memory-utilization must be in (0, 1)")
     if getattr(args, "backend", "cuda") == "rocm":
         _validate_topology_args(args)
-        if args.rollout_cp_size != 1:
-            raise ReproError("ROCm rollout CP > 1 requires a validated PCP adapter")
+        # ROCm and CUDA use the same VIME prefill-context-parallel contract.
+        # The rollout engine count is derived from rollout TP * rollout CP.
         if not math.isfinite(args.rollout_temperature) or args.rollout_temperature <= 0:
             raise ReproError("--temperature must be finite and positive")
         if not 0 < args.rollout_top_p <= 1:

@@ -52,9 +52,19 @@ def test_cuda_verify_preserves_short_verification_defaults(tmp_path, monkeypatch
     assert plans[0].max_response_len == 512
 
 
-@pytest.mark.parametrize('option', [['--top-k','128'], ['--temperature','0'], ['--rollout-cp','2']])
+@pytest.mark.parametrize('option', [['--top-k','128'], ['--temperature','0']])
 def test_rocm_unsupported_capabilities_fail_in_plan(tmp_path, option):
     assert repro.main(['plan', '--profile', profile_file(tmp_path, 'rocm'), *option]) == 2
+
+
+def test_rollout_cp_is_forwarded_for_both_backends(tmp_path, capsys):
+    for backend in ('cuda', 'rocm'):
+        assert repro.main(['plan', '--profile', profile_file(tmp_path, backend),
+                           '--tp', '4', '--cp', '2', '--rollout-tp', '2',
+                           '--rollout-cp', '2']) == 0
+        command = json.loads(capsys.readouterr().out)['runner_command']
+        assert command[command.index('--rollout-tp-size') + 1] == '2'
+        assert command[command.index('--rollout-cp-size') + 1] == '2'
 
 
 def test_rocm_optimizer_parameters_reach_manifest_and_shell_environment(tmp_path):

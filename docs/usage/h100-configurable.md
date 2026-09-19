@@ -23,9 +23,11 @@ Training TP can be 1, 2, 4 or 8 on this eight-GPU Qwen3-8B profile. If `--cp`
 is omitted it is inferred as `8 / TP`; explicit `TP * CP` must equal eight.
 Rollout TP can be chosen independently and must divide the GPU count. Engine
 counts and CUDA Graph batch sizes are derived from the chosen topology.
-Rollout CP is currently limited to 1: vLLM 0.16 FlashAttention does not
-implement prefill context parallelism. A larger value fails before launch.
-This restriction does not apply to training CP. The launcher also rejects
+Rollout CP is prefill context parallelism and is passed to vLLM's
+`ParallelConfig.prefill_context_parallel_size`; decode remains TP-only. The
+per-engine GPU count is `rollout TP * rollout CP`, so that product must divide
+the eight rollout GPUs. This requires the companion VIME/vLLM integration that
+ships with this profile and should be validated on the target runtime. The launcher also rejects
 submission while GPUs have existing compute processes; it cannot reserve
 the GPUs against other users starting a process later.
 When both training TP and rollout TP are 1, the launcher offloads the training

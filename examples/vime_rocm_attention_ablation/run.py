@@ -146,8 +146,8 @@ class MatrixConfig:
             raise ValueError("rollout_top_p must be in (0, 1]")
         if self.rollout_top_k != -1:
             raise ValueError("strict ROCm top-k replay is not supported; use -1")
-        if self.rollout_context_parallel_size != 1:
-            raise ValueError("ROCm rollout CP > 1 requires a validated PCP adapter")
+        # VIME forwards PCP to vLLM's prefill context-parallel setting.
+        # Decode remains TP-only.
         visible = [item.strip() for item in self.visible_gpus.split(",") if item.strip()]
         if len(visible) != self.num_gpus or len(set(visible)) != len(visible):
             raise ValueError("visible_gpus must contain exactly num_gpus unique device IDs")

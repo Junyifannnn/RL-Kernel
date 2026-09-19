@@ -412,11 +412,8 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError("--weight-decay must be finite and nonnegative")
     if not math.isfinite(args.kl_loss_coef) or args.kl_loss_coef < 0:
         raise ValueError("--kl-loss-coef must be finite and nonnegative")
-    if args.rollout_cp_size != 1:
-        raise ValueError(
-            "vLLM 0.16 FlashAttention does not support rollout CP > 1 in this profile; "
-            "use --rollout-cp-size 1. Training CP is independent and configurable."
-        )
+    # VIME passes this value to vLLM ParallelConfig.prefill_context_parallel_size.
+    # Decode remains ordinary TP; PCP is used for prefill only.
     if args.require_updates and args.num_rollout < 2:
         raise ValueError("--require-updates needs at least two rollouts to check weight resync")
     trajectories_per_rollout = args.rollout_batch_size * args.n_samples_per_prompt

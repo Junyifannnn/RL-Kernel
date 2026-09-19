@@ -44,7 +44,7 @@ Ray setup and framework versions remain different.
 | Mixed per-request temperatures | Rollout adapter handles row values; full-model tests use one value per run | Strict scoring uses the configured run temperature; heterogeneous requests not certified |
 | Training TP/CP | `(1,8),(2,4),(4,2),(8,1)` | Same factorizations |
 | Independent rollout TP | 1/2/4/8 | 1/2/4/8 |
-| Rollout CP > 1 / training PP > 1 | Unsupported in this runner | Unsupported in this runner |
+| Rollout CP > 1 | Wired as vLLM prefill CP; target-runtime validation required | Wired through the same VIME PCP adapter; target-runtime validation required |
 | `verify` with real weight-update acceptance | Supported, two steps by default | Not implemented; explicit error |
 | `run` and `plan` | Shared interface | Shared interface |
 | `--detach`, `--allow-dirty`, standalone prepare/doctor/validate/report | CUDA path | Not shared; explicit errors for unsupported options/commands |

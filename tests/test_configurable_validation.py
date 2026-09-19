@@ -122,10 +122,9 @@ def test_invalid_kl_coefficient_is_not_silently_disabled(tmp_path, value):
         _runner_command(_resolved_paths(profile, args), profile, args)
 
 
-def test_unsupported_rollout_cp_fails_before_launch():
+def test_rollout_cp_is_valid_when_the_engine_product_fits():
     args = build_parser().parse_args(["verify", "--rollout-tp", "2", "--rollout-cp", "2"])
-    with pytest.raises(repro.ReproError, match="does not support"):
-        repro._validate_topology_args(args)
+    repro._validate_topology_args(args)
 
 
 def test_tp1_train_and_rollout_enable_offload():

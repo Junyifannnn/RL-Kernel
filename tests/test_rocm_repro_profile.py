@@ -78,7 +78,6 @@ def test_machine_profile_and_short_options_override_defaults(tmp_path, monkeypat
     "options",
     [
         ["--tp", "3"],
-        ["--rollout-cp", "2"],
         ["--temperature", "0"],
         ["--temperature", "nan"],
         ["--top-p", "0"],
