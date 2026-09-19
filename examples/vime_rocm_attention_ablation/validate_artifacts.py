@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -918,6 +917,7 @@ def compare_train_rollout_logps(
                 )
 
     mismatch_count = 0
+    bitwise_mismatch_count = 0
     element_count = 0
     sum_abs_diff = 0.0
     sum_mismatch_kl = 0.0
@@ -955,6 +955,11 @@ def compare_train_rollout_logps(
             errors.append(f"sample {key!r} contains non-finite log probabilities")
             continue
         mismatch_count += int(torch.ne(active_training, active_rollout).sum().item())
+        training_bytes = active_training.contiguous().view(torch.uint8).reshape(
+            -1, active_training.element_size()
+        )
+        rollout_bytes = active_rollout.contiguous().view(torch.uint8).reshape_as(training_bytes)
+        bitwise_mismatch_count += int((training_bytes != rollout_bytes).any(dim=1).sum().item())
         delta = active_training.to(torch.float64) - active_rollout.to(torch.float64)
         absolute = delta.abs()
         k3 = torch.exp(delta) - delta - 1.0
@@ -975,13 +980,16 @@ def compare_train_rollout_logps(
     mismatch_kl = sum_mismatch_kl / element_count if element_count else None
     mismatch_k3_kl = sum_mismatch_k3_kl / element_count if element_count else None
     exact = element_count > 0 and mismatch_count == 0 and max_abs_diff == 0.0
-    if require_exact and not exact:
+    bitwise_exact = exact and bitwise_mismatch_count == 0
+    if require_exact and not bitwise_exact:
         errors.append("R/R requires bitwise-equal training and rollout log probabilities")
     return {
         "passed": not errors,
         "errors": errors,
         "require_exact": require_exact,
         "torch_equal": exact,
+        "bitwise_equal": bitwise_exact,
+        "bitwise_mismatch_count": bitwise_mismatch_count,
         "mismatch_count": mismatch_count,
         "max_abs_diff": max_abs_diff if element_count else None,
         "train_rollout_logprob_abs_diff": mean_abs_diff,

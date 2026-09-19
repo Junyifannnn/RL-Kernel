@@ -6,6 +6,7 @@ import torch
 from types import SimpleNamespace
 
 import examples.vime_qwen3_8b_tp4_cp2_200.validate_run as validator
+import examples.vime_rocm_attention_ablation.validate_artifacts as artifacts
 from examples.vime_qwen3_8b_tp4_cp2_200.run_arm import _rollout_topology
 import rl_engine.repro as repro
 from rl_engine.repro import build_parser, _runner_command, _resolved_paths
@@ -148,3 +149,23 @@ def test_busy_gpu_preflight(monkeypatch):
         repro._require_idle_gpus()
     monkeypatch.setattr(repro.subprocess, "run", lambda *a, **kw: SimpleNamespace(stdout=""))
     repro._require_idle_gpus()
+
+
+def test_bitwise_gate_rejects_signed_zero_difference(tmp_path):
+    payload = {
+        "schema_version": artifacts.SIDECAR_SCHEMA_VERSION,
+        "tensor_parallel_size": 1,
+        "context_parallel_size": 1,
+        "rank": 0,
+        "call_index": 0,
+        "train_log_probs": [torch.tensor([0.0])],
+        "rollout_log_probs": [torch.tensor([-0.0])],
+        "loss_masks": [torch.tensor([1])],
+        "total_lengths": [2],
+        "response_lengths": [1],
+    }
+    torch.save(payload, tmp_path / "rank00000.call00000000.pt")
+    result = artifacts.compare_train_rollout_logps(tmp_path, require_exact=True)
+    assert result["torch_equal"]
+    assert result["bitwise_mismatch_count"] == 1
+    assert not result["passed"]

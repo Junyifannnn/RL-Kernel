@@ -75,7 +75,9 @@ def main():
             )
             if reference is None:
                 reference = score.clone()
-            assert torch.equal(score, reference), f"cross-TP logprob differs at TP{tp}"
+            assert torch.equal(
+                score.contiguous().view(torch.uint8), reference.contiguous().view(torch.uint8)
+            ), f"cross-TP logprob bits differ at TP{tp}"
             if rank == 0:
                 results.append(
                     {
