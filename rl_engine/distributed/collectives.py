@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import socket
+import os
 import sys
 import threading
 from collections.abc import Iterable
@@ -307,7 +308,21 @@ class DeterministicCollective:
             device=self.device,
         )
 
-        handle, offset = self._extension.deterministic_collective_ipc_meta(self._staging)
+        try:
+            handle, offset = self._extension.deterministic_collective_ipc_meta(self._staging)
+        except RuntimeError as exc:
+            module = sys.modules.get("torch_memory_saver")
+            saver = getattr(module, "torch_memory_saver", None)
+            impl = getattr(saver, "_impl", None)
+            binary = getattr(impl, "_binary_wrapper", None)
+            active = getattr(getattr(binary, "cdll", None), "tms_get_interesting_region", None)
+            exc.add_note(
+                f"IPC allocation: rank={self.rank}, capacity={self.max_size_bytes}, "
+                f"saver={getattr(module, '__file__', None)}, "
+                f"active={active() if callable(active) else None}, "
+                f"LD_PRELOAD={os.environ.get('LD_PRELOAD', '')}"
+            )
+            raise
         local_meta = {
             "handle": handle,
             "offset": int(offset),

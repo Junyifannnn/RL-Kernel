@@ -12,7 +12,12 @@ torch.cuda.set_device(rank)
 with saver.disable():
     dist.init_process_group("nccl", device_id=torch.device("cuda", rank))
     dist.barrier()
-collective = DeterministicCollective(max_size_bytes=1024 * 1024)
+# Match the training CP arena and exercise lazy initialization after offload.
+x = torch.full((256,), rank + 1.0, device="cuda")
+torch.cuda.synchronize()
+saver.pause()
+saver.resume()
+collective = DeterministicCollective(max_size_bytes=64 * 1024 * 1024)
 x = torch.full((256,), rank + 1.0, device="cuda")
 for phase in range(2):
     if phase:
