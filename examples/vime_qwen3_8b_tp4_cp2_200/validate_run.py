@@ -27,7 +27,6 @@ EXPECTED_FIXED_TOPOLOGY = {
     "rollout_gpus": 8,
     "pp": 1,
     "colocate": True,
-    "offload_train": False,
     "offload_rollout": True,
 }
 CASE_FIELDS = {
@@ -74,6 +73,12 @@ def _validate_topology(value: Any) -> list[str]:
     rollout_gpus_per_engine = value.get("rollout_gpus_per_engine")
     rollout_cp = value.get("rollout_cp", 1)
     rollout_tp = value.get("rollout_tp", rollout_gpus_per_engine)
+    expected_offload = tensor_parallel == 1 and rollout_tp == 1 and rollout_cp == 1
+    if not isinstance(value.get("offload_train"), bool) or value["offload_train"] != expected_offload:
+        errors.append(
+            f"manifest topology offload_train={value.get('offload_train')!r}, "
+            f"expected {expected_offload!r} for training TP{tensor_parallel}/rollout TP{rollout_tp}"
+        )
     rollout_engines = value.get("rollout_engines")
     if (
         not isinstance(rollout_gpus, int)

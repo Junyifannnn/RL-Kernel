@@ -135,6 +135,17 @@ def test_tp1_train_and_rollout_enable_offload():
     ]
 
 
+@pytest.mark.parametrize("tp", [1, 2, 4, 8])
+@pytest.mark.parametrize("rollout_tp", [1, 2, 4, 8])
+def test_validator_accepts_derived_offload_and_rejects_inverted_flag(tp, rollout_tp):
+    topology = _rollout_topology(
+        rollout_tp, 1, tensor_parallel_size=tp, context_parallel_size=8 // tp
+    )
+    assert validator._validate_topology(topology) == []
+    topology["offload_train"] = not topology["offload_train"]
+    assert any("offload_train" in error for error in validator._validate_topology(topology))
+
+
 def test_verify_defaults_require_real_updates():
     args = build_parser().parse_args(["verify"])
     assert args.wait and args.require_updates
