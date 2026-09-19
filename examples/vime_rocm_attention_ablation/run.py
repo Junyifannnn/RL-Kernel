@@ -100,6 +100,9 @@ class MatrixConfig:
     rollout_temperature: float = 1.0
     rollout_top_p: float = 1.0
     rollout_top_k: int = -1
+    learning_rate: float = 1e-6
+    weight_decay: float = 0.1
+    kl_coef: float = 0.0
     ray_port: int = 6385
     ray_dashboard_port: int = 28265
 
@@ -133,6 +136,10 @@ class MatrixConfig:
         return REFERENCE_GLOBAL_VOCAB_DIVISIBILITY // self.tensor_parallel_size
 
     def validate(self, *, require_paths: bool) -> None:
+        for name in ("learning_rate", "weight_decay", "kl_coef"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
         if not math.isfinite(self.rollout_temperature) or self.rollout_temperature <= 0:
             raise ValueError("rollout_temperature must be finite and positive")
         if not 0 < self.rollout_top_p <= 1:
@@ -307,11 +314,12 @@ class MatrixConfig:
             },
             "optimizer": {
                 "name": "adam",
-                "lr": 1e-6,
-                "weight_decay": 0.1,
+                "lr": self.learning_rate,
+                "weight_decay": self.weight_decay,
                 "beta1": 0.9,
                 "beta2": 0.98,
             },
+            "reference_kl": {"enabled": self.kl_coef > 0, "coefficient": self.kl_coef},
             "seed": self.seed,
             "rollout_seed": self.rollout_seed,
             "mismatch_metrics_hook": (
@@ -591,6 +599,10 @@ def build_arm_environment(
             "RLK_ABLATION_ROLLOUT_TEMPERATURE": str(config.rollout_temperature),
             "RLK_ABLATION_ROLLOUT_TOP_P": str(config.rollout_top_p),
             "RLK_ABLATION_ROLLOUT_TOP_K": str(config.rollout_top_k),
+            "RLK_ABLATION_LR": str(config.learning_rate),
+            "RLK_ABLATION_WEIGHT_DECAY": str(config.weight_decay),
+            "RLK_ABLATION_USE_KL_LOSS": "1" if config.kl_coef > 0 else "0",
+            "RLK_ABLATION_KL_LOSS_COEF": str(config.kl_coef),
             "RL_KERNEL_VLLM_INTEGRATION": "1",
             "RL_KERNEL_READBACK_DIR": str((arm_dir / "readbacks").resolve()),
             "RL_KERNEL_MISMATCH_SIDECAR_DIR": str(

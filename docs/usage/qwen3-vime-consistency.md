@@ -52,8 +52,7 @@ topology. Formal evidence runs must use clean source checkouts and must not pass
 The bundled CUDA profile targets one Linux node with eight 80 GB NVIDIA H100 GPUs.
 Megatron runs TP4/CP2 and two colocated vLLM engines run TP4. The frozen runtime
 contract is Python 3.11.15, PyTorch 2.9.1, vLLM 0.16.0, Ray 2.57.0, and
-Transformer Engine 2.18. Other hardware or topology is development work, not a
-drop-in path change.
+Transformer Engine 2.18. The current topology evidence and limitations are listed below.
 
 Before starting, provide:
 
@@ -69,69 +68,21 @@ environment.
 
 ## Topology support and evidence
 
-Topology validity and end-to-end evidence are different things. The launcher
-accepts any topology that passes its GPU-count and Qwen3-8B sharding checks,
-while the table below records how much runtime evidence each layout has.
+The [current CUDA/ROCm audit](cuda-rocm-consistency-audit.md) records the common
+short command, exact tested configurations, source dependencies and remaining gaps.
+Both platforms accept training TP/CP `(1,8),(2,4),(4,2),(8,1)` and independent
+rollout TP1/2/4/8, with rollout CP1. The newest CUDA evidence is five two-step
+runs; ROCm has nine one-step cases. Earlier one-round numbers below are historical.
 
-| Backend | Training topology | Rollout topology | Status |
-|---|---|---|---|
-| CUDA H100 | TP4/CP2 | TP4/CP1, two engines | Supported reference topology |
-| CUDA H100 | TP1/CP8 | TP4/CP1, two engines | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
-| CUDA H100 | TP2/CP4 | TP4/CP1, two engines | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
-| CUDA H100 | TP8/CP1 | TP4/CP1, two engines | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
-| CUDA H100 | Any valid training TP×CP | Rollout CP greater than 1 | Experimental; requires vLLM prefill context-parallel integration and separate evidence |
-| CUDA H100 | TP4/CP2 | TP2/CP1 or TP8/CP1 | One-round strict smoke passed on September 19, 2026 with zero mean/max LogP difference and zero mismatches |
-| CUDA H100 | TP4/CP2 | TP1/CP1 | Canonical-shard code path is present; end-to-end validation pending |
-| ROCm MI300X | TP4/CP2 | TP4, two engines | Backend/topology has 200-step evidence; rerun the new no-reuse pair |
-| ROCm gfx942 | Other valid TP×CP | Rollout TP dividing available GPUs | Experimental; configuration checks only |
-
-The validated TP2/CP4 CUDA smoke uses the same TP4 rollout topology:
+After configuring `.rlk-profile.json` once, use the same command on either backend:
 
 ```bash
-rlk-repro plan \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode consistency \
-  --tp-size 2 \
-  --cp-size 4 \
-  --rollout-tp-size 4 \
-  --rollout-cp-size 1
-
-rlk-repro run \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode consistency \
-  --tp-size 2 \
-  --cp-size 4 \
-  --rollout-tp-size 4 \
-  --rollout-cp-size 1 \
-  --rollouts 8 \
-  --wait
+./rlk run --tp 2 --rollout-tp 4 --temperature 0.7 --top-p 0.95 --steps 200
 ```
 
-The same command form covers every validated eight-GPU training factorization.
-For example, TP8/CP1 is:
-
-```bash
-rlk-repro run \
-  --workspace "$RLK_REPRO_WORKSPACE" \
-  --mode consistency \
-  --tp-size 8 \
-  --cp-size 1 \
-  --rollout-tp-size 8 \
-  --rollout-cp-size 1 \
-  --rollouts 8 \
-  --wait
-```
-
-Passing argument validation proves only that GPU counts, Qwen3-8B sharding,
-and manifest relationships are coherent. A new training topology is supported
-only after both `native` and `consistency` pass the runtime validator on the
-target hardware.
-
-TP1/CP8 keeps the complete actor weights on every GPU. The CUDA launcher
-therefore defaults vLLM memory utilization to `0.2` for training TP1 and `0.4`
-otherwise. Users normally do not need to pass
-`--vllm-gpu-memory-utilization`; an explicit value still overrides the
-topology-aware default.
+CP is inferred from TP unless explicitly supplied. See
+[H100 verification](h100-configurable.md) for the CUDA-only `verify` contract.
+Per-run train/rollout equality does not certify cross-topology optimizer equality.
 
 ### One-round CUDA smoke performance
 
@@ -297,13 +248,13 @@ export PATH="$PWD/bin:/opt/venv/bin:$PATH"
 export RLK_REPRO_PROFILE="$PWD/examples/vime_rocm_attention_ablation/profiles/mi300x-qwen3-8b.json"
 
 # One complete round: eight samples, maximum response length 7168.
-rlk-repro run --tp 2 --cp 4 --rollout-tp 4 --temperature 0.7 --top-p 0.95
+./rlk run --tp 2 --rollout-tp 4 --temperature 0.7 --top-p 0.95 --steps 1
 
 # Change topology and sampling without editing a script.
-rlk-repro run --tp 8 --cp 1 --rollout-tp 4 --temperature 1.3 --top-p 0.8
+./rlk run --tp 8 --rollout-tp 4 --temperature 1.3 --top-p 0.8 --steps 1
 
-# Inspect the resolved command; add --rollouts 200 for a longer run.
-rlk-repro plan --tp 4 --cp 2 --rollout-tp 2 --temperature 1 --top-p 1
+# Inspect the resolved command; the shared run default is 200 steps.
+./rlk plan --tp 4 --rollout-tp 2 --temperature 1 --top-p 1
 ```
 
 `--profile FILE` overrides `RLK_REPRO_PROFILE`. Explicit CLI values override
@@ -319,6 +270,8 @@ strict train/rollout logprob equality before returning success. It explicitly
 disables rollout-logprob reuse. Each run gets a unique directory unless
 `--run-id NAME` is supplied; existing output directories are never overwritten.
 The launcher creates its own Ray cluster and refuses to stop an unrelated one.
+The CUDA-only `verify`, standalone utility commands and `--detach` are not ROCm capabilities;
+see the audit for the explicit command differences.
 
 On this eight-GPU Qwen3-8B setup, training `(TP, CP)` can be `(1,8)`, `(2,4)`,
 `(4,2)` or `(8,1)`; rollout TP can be 1, 2, 4 or 8. The finer training/rollout TP

@@ -142,6 +142,9 @@ def parse_args(argv=None):
     parser.add_argument("--rollout-temperature", type=float, default=1.0)
     parser.add_argument("--rollout-top-p", type=float, default=1.0)
     parser.add_argument("--rollout-top-k", type=int, default=-1)
+    parser.add_argument("--lr", type=float, default=1e-6)
+    parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--kl-coef", type=float, default=0.0)
     parser.add_argument("--rollout-batch-size", type=int, default=1)
     parser.add_argument("--fixed-paged-tile", default="128")
     parser.add_argument("--paged-kv-max-tokens", default="8192")
@@ -184,6 +187,9 @@ def main(argv=None) -> int:
         rollout_temperature=args.rollout_temperature,
         rollout_top_p=args.rollout_top_p,
         rollout_top_k=args.rollout_top_k,
+        learning_rate=args.lr,
+        weight_decay=args.weight_decay,
+        kl_coef=args.kl_coef,
         ray_port=args.ray_port,
         ray_dashboard_port=args.ray_dashboard_port,
     )

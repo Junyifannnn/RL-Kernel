@@ -2,7 +2,10 @@
   "schema_version": "rlkernel.repro.profile.v1",
   "name": "mi300x-qwen3-8b",
   "description": "Eight MI300X GPUs, strict train/rollout logprob comparison without rollout-logprob reuse. Edit paths once for another machine.",
-  "requirements": {"backend": "rocm", "python": "3.12"},
+  "requirements": {
+    "backend": "rocm",
+    "python": "3.12"
+  },
   "paths": {
     "workspace": "/workspace/rocm-unified-20260919",
     "rl_kernel_root": "/workspace/rocm-unified-20260919/rl-kernel",
@@ -18,12 +21,11 @@
   "defaults": {
     "backend": "rocm",
     "mode": "consistency",
-    "rollouts": 1,
+    "rollouts": 200,
     "tp": 4,
-    "cp": 2,
     "rollout-tp": 4,
-    "temperature": 0.7,
-    "top-p": 0.95,
+    "temperature": 1.0,
+    "top-p": 1.0,
     "samples-per-prompt": 8,
     "global-batch-size": 8,
     "rollout-batch-size": 1,

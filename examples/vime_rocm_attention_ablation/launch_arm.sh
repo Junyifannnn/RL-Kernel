@@ -335,9 +335,9 @@ ray job submit \
   --global-batch-size "${RLK_ABLATION_GLOBAL_BATCH_SIZE}" \
   --balance-data \
   --optimizer adam \
-  --lr 1e-6 \
+  --lr "${RLK_ABLATION_LR:-1e-6}" \
   --lr-decay-style constant \
-  --weight-decay 0.1 \
+  --weight-decay "${RLK_ABLATION_WEIGHT_DECAY:-0.1}" \
   --adam-beta1 0.9 \
   --adam-beta2 0.98 \
   --advantage-estimator grpo \

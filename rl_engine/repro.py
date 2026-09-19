@@ -447,8 +447,8 @@ def _validate_topology_args(args: argparse.Namespace) -> None:
         raise ReproError("--rollout-tp-size * --rollout-cp-size must divide 8 GPUs")
     if rollout_cp_size != 1:
         raise ReproError(
-            "This H100 profile uses vLLM 0.16 FlashAttention, which does not support "
-            "rollout CP > 1. Use --rollout-cp 1; training --cp remains configurable."
+            "The supported CUDA/ROCm rollout adapters require --rollout-cp 1; "
+            "training --cp remains configurable."
         )
 
 
@@ -474,6 +474,16 @@ def _example_root_for_run(run_dir: Path) -> Path:
 
 def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namespace) -> list[str]:
     arm = canonical_arm(args.arm)
+    for name in ("lr", "weight_decay", "kl_coef"):
+        value = getattr(args, name)
+        if not math.isfinite(value) or value < 0:
+            raise ReproError(f"--{name.replace('_', '-')} must be finite and nonnegative")
+    if args.max_response_len is not None and args.max_response_len <= 0:
+        raise ReproError("--max-response-len must be positive")
+    if args.max_tokens_per_gpu is not None and args.max_tokens_per_gpu <= 0:
+        raise ReproError("--max-tokens-per-gpu must be positive")
+    if args.vllm_gpu_memory_utilization is not None and not 0 < args.vllm_gpu_memory_utilization < 1:
+        raise ReproError("--vllm-gpu-memory-utilization must be in (0, 1)")
     if getattr(args, "backend", "cuda") == "rocm":
         _validate_topology_args(args)
         if args.rollout_cp_size != 1:
@@ -507,6 +517,9 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
             "rollout-temperature": args.rollout_temperature,
             "rollout-top-p": args.rollout_top_p,
             "rollout-top-k": args.rollout_top_k,
+            "lr": args.lr,
+            "weight-decay": args.weight_decay,
+            "kl-coef": args.kl_coef,
             "rl-kernel-root": paths.rl_kernel_root,
             "vime-root": paths.vime_root,
             "megatron-root": paths.megatron_root,
@@ -517,6 +530,12 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
             command.extend([f"--{flag}", str(value)])
         if args.max_response_len is not None:
             command.extend(["--max-response-length", str(args.max_response_len)])
+        if args.command == "run" and not args.wait:
+            raise ReproError("ROCm run currently waits for validation; --detach is not supported")
+        if args.allow_dirty:
+            raise ReproError("ROCm requires frozen source checks; --allow-dirty is not supported")
+        if "--ray-address" in getattr(args, "explicit_flags", set()):
+            raise ReproError("ROCm manages its Ray instance via --ray-port and --ray-dashboard-port")
         if args.command == "verify" or args.require_updates:
             raise ReproError("ROCm does not yet implement the weight-update verify contract; use run for train/rollout logprob validation")
         if args.rollout_top_k != -1:
@@ -952,7 +971,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         profile, _profile_path_value = _load_profile(getattr(args, "profile", None))
-        if args.command in ("plan", "run"):
+        if args.command in ("plan", "run", "verify"):
             defaults = profile.get("defaults", {})
             allowed = {
                 "backend",
@@ -964,6 +983,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "rollout-cp",
                 "temperature",
                 "top-p",
+                "top-k",
+                "lr",
+                "weight-decay",
+                "kl-coef",
+                "steps",
+                "max-response-len",
                 "seed",
                 "rollout-seed",
                 "ray-port",
@@ -977,9 +1002,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             }
             if not isinstance(defaults, dict) or set(defaults) - allowed:
                 raise ReproError("profile defaults contains unsupported run options")
+            defaults = dict(defaults)
+            defaults.setdefault("backend", profile.get("requirements", {}).get("backend", "cuda"))
+            explicit = {item.split("=", 1)[0] for item in argv[1:] if item.startswith("--")}
+            # Changing TP alone must infer CP from that TP, not retain a stale
+            # machine-profile CP. An explicit --cp always takes precedence.
+            if explicit & {"--tp", "--tp-size"} and not explicit & {"--cp", "--cp-size"}:
+                defaults.pop("cp", None)
+            if args.command == "verify":
+                for key in ("rollouts", "steps", "max-response-length", "max-response-len"):
+                    defaults.pop(key, None)
             flags = [part for key, value in defaults.items() for part in (f"--{key}", str(value))]
-            # Explicit command-line values come last and override the machine profile.
             args = parser.parse_args([argv[0], *flags, *argv[1:]])
+            args.explicit_flags = explicit
+        elif profile.get("requirements", {}).get("backend") == "rocm":
+            raise ReproError(
+                "This ROCm profile supports plan and run (including automatic validation); "
+                f"the {args.command} command is currently CUDA-only"
+            )
         if args.command == "validate":
             run_dir = args.run_dir.expanduser().resolve()
             command = [
@@ -1001,6 +1041,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_plan(paths, profile, args)
             return 0
         if args.command in {"run", "verify"}:
+            if args.dry_run:
+                _print_plan(paths, profile, args)
+                return 0
             if args.backend == "rocm":
                 if args.dry_run:
                     _print_plan(paths, profile, args)

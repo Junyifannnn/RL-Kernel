@@ -1,3 +1,144 @@
+diff --git a/scripts/run-qwen3-8B-rlkernel-tp2-cp2.sh b/scripts/run-qwen3-8B-rlkernel-tp2-cp2.sh
+index d84dbdf2..bb272d79 100755
+--- a/scripts/run-qwen3-8B-rlkernel-tp2-cp2.sh
++++ b/scripts/run-qwen3-8B-rlkernel-tp2-cp2.sh
+@@ -86,8 +86,8 @@ ROLLOUT_GPUS_PER_ENGINE="${ROLLOUT_GPUS_PER_ENGINE:-2}"
+ ROLLOUT_TOP_P="${ROLLOUT_TOP_P:-1.0}"
+ COLOCATE="${COLOCATE:-0}"
+ 
+-if [[ "${NUM_GPUS}" != "8" || "${ACTOR_GPUS}" != "4" || "${ROLLOUT_GPUS}" != "4" ]]; then
+-  echo "This validation entry point requires an 8-GPU node with 4 actor GPUs and 4 rollout GPUs" >&2
++if [[ "${NUM_GPUS}" != "8" ]]; then
++  echo "This validation entry point requires an 8-GPU node" >&2
+   exit 2
+ fi
+ if [[ "${COLOCATE}" != "0" && "${COLOCATE}" != "1" ]]; then
+@@ -95,8 +95,25 @@ if [[ "${COLOCATE}" != "0" && "${COLOCATE}" != "1" ]]; then
+   exit 2
+ fi
+ 
+-if [[ "${TP_SIZE}" != "2" || "${CP_SIZE}" != "2" ]]; then
+-  echo "This validation entry point is intentionally fixed to TP=2, CP=2" >&2
++if [[ "$((TP_SIZE * CP_SIZE))" != "${ACTOR_GPUS}" ]]; then
++  echo "TP_SIZE * CP_SIZE must equal ACTOR_GPUS" >&2
++  exit 2
++fi
++if [[ "${COLOCATE}" == "1" ]]; then
++  if [[ "${ACTOR_GPUS}" != "8" || "${ROLLOUT_GPUS}" != "8" ]]; then
++    echo "Colocated execution requires 8 actor GPUs and 8 logical rollout GPUs" >&2
++    exit 2
++  fi
++elif [[ "${ACTOR_GPUS}" != "4" || "${ROLLOUT_GPUS}" != "4" ]]; then
++  echo "Disjoint execution requires 4 actor GPUs and 4 rollout GPUs" >&2
++  exit 2
++fi
++if [[ "${ROLLOUT_GPUS_PER_ENGINE}" != "${TP_SIZE}" ]]; then
++  echo "ROLLOUT_GPUS_PER_ENGINE must equal TP_SIZE for aligned logp validation" >&2
++  exit 2
++fi
++if (( ROLLOUT_GPUS % ROLLOUT_GPUS_PER_ENGINE != 0 )); then
++  echo "ROLLOUT_GPUS must be divisible by ROLLOUT_GPUS_PER_ENGINE" >&2
+   exit 2
+ fi
+ if [[ "${RL_KERNEL_MODE}" != off \
+@@ -110,7 +127,7 @@ source "${VIME_ROOT}/scripts/models/qwen3-8B.sh"
+ 
+ MODEL_ROOT="${MODEL_ROOT:-/root/Qwen3-8B}"
+ TORCH_DIST_ROOT="${TORCH_DIST_ROOT:-/root/Qwen3-8B_torch_dist}"
+-VIME_CKPT="${VIME_CKPT:-/root/Qwen3-8B_vime_rlkernel_tp2_cp2}"
++VIME_CKPT="${VIME_CKPT:-/root/Qwen3-8B_vime_rlkernel_tp${TP_SIZE}_cp${CP_SIZE}}"
+ PROMPT_DATA="${PROMPT_DATA:-/root/dapo-math-17k/dapo-math-17k.jsonl}"
+ 
+ if ! command -v nvidia-smi >/dev/null 2>&1; then
+diff --git a/scripts/run-qwen3-8B-rlkernel-tp4-cp2.sh b/scripts/run-qwen3-8B-rlkernel-tp4-cp2.sh
+new file mode 100755
+index 00000000..55ab3f35
+--- /dev/null
++++ b/scripts/run-qwen3-8B-rlkernel-tp4-cp2.sh
+@@ -0,0 +1,15 @@
++#!/usr/bin/env bash
++# Qwen3-8B TP4/CP2 GRPO consistency run on one colocated 8-GPU node.
++
++set -euo pipefail
++
++export TP_SIZE=4
++export CP_SIZE=2
++export ACTOR_GPUS=8
++export ROLLOUT_GPUS=8
++export NUM_GPUS=8
++export ROLLOUT_GPUS_PER_ENGINE=4
++export COLOCATE=1
++
++SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
++exec "${SCRIPT_DIR}/run-qwen3-8B-rlkernel-tp2-cp2.sh" "$@"
+diff --git a/tests/test_linear_logp_provider.py b/tests/test_linear_logp_provider.py
+index eef9c411..63603eeb 100644
+--- a/tests/test_linear_logp_provider.py
++++ b/tests/test_linear_logp_provider.py
+@@ -1,5 +1,6 @@
+ from __future__ import annotations
+ 
++import logging
+ import sys
+ import types
+ from types import SimpleNamespace
+@@ -7,6 +8,7 @@ from types import SimpleNamespace
+ import pytest
+ import torch
+ 
++import vime.backends.megatron_utils.linear_logp_provider as provider_module
+ from vime.backends.megatron_utils.linear_logp_provider import (
+     LinearLogpContext,
+     LinearLogpProviderUnavailable,
+@@ -74,12 +76,19 @@ def _args(path=None, mode="auto"):
+     return SimpleNamespace(linear_logp_provider=path, linear_logp_provider_mode=mode)
+ 
+ 
+-def test_unconfigured_provider_uses_native_path():
++def test_unconfigured_provider_uses_native_path_and_reports_actual_backend(caplog):
+     request = _request()
+-    actual, entropy = compute_linear_logp(args=_args(), request=request, native=_native)
++    provider_module._LOGGED_NATIVE_IDENTITIES.clear()
++    with caplog.at_level(logging.INFO, logger=provider_module.__name__):
++        actual, entropy = compute_linear_logp(args=_args(), request=request, native=_native)
+ 
+     assert entropy is None
+     torch.testing.assert_close(actual, request.logits[:, :1])
++    assert "linear_logp native active:" in caplog.text
++    assert f"backend_id={__name__}._native" in caplog.text
++    assert "contract_id=vime.native.linear_logp.v1" in caplog.text
++    assert "route=unconfigured" in caplog.text
++    assert "device=cpu" in caplog.text
+ 
+ 
+ def test_provider_receives_structured_request_and_returns_result(monkeypatch):
+@@ -154,9 +163,10 @@ def test_provider_may_return_a_structural_result_from_an_external_package(monkey
+     torch.testing.assert_close(actual, request.logits[:, :1])
+ 
+ 
+-def test_auto_mode_only_falls_back_for_explicit_unavailability(monkeypatch):
++def test_auto_mode_only_falls_back_for_explicit_unavailability(monkeypatch, caplog):
+     request = _request()
+     calls = {"native": 0}
++    provider_module._LOGGED_NATIVE_IDENTITIES.clear()
+ 
+     def provider(_request):
+         raise LinearLogpProviderUnavailable("unsupported topology")
+@@ -166,11 +176,13 @@ def test_auto_mode_only_falls_back_for_explicit_unavailability(monkeypatch):
+         return _native(*args, **kwargs)
+ 
+     path = _install_provider(monkeypatch, provider)
+-    actual, entropy = compute_linear_logp(args=_args(path), request=request, native=native)
++    with caplog.at_level(logging.INFO, logger=provider_module.__name__):
++        actual, entropy = compute_linear_logp(args=_args(path), request=request, native=native)
+ 
+     assert calls["native"] == 1
+     assert entropy is None
+     torch.testing.assert_close(actual, request.logits[:, :1])
++    assert "route=provider_unavailable_fallback" in caplog.text
+ 
+ 
+ def test_strict_mode_rejects_unavailable_provider(monkeypatch):
 diff --git a/tests/test_vllm_rollout.py b/tests/test_vllm_rollout.py
 index 9e4b7db2..097c970a 100644
 --- a/tests/test_vllm_rollout.py
@@ -76,6 +217,37 @@ index 9e4b7db2..097c970a 100644
  @pytest.mark.unit
  def test_build_inference_sampling_params_forwards_disabled_top_k():
      sp = mod._build_inference_sampling_params({"max_new_tokens": 8, "temperature": 0.0, "top_p": 1.0, "top_k": -1})
+diff --git a/tests/utils/test_vllm_engine.py b/tests/utils/test_vllm_engine.py
+index 8e919320..34dd8dda 100644
+--- a/tests/utils/test_vllm_engine.py
++++ b/tests/utils/test_vllm_engine.py
+@@ -247,6 +247,26 @@ def test_compute_server_args_external_check_fields_skip_orchestration_fields(vll
+     assert sa["weight_transfer_config"] == {"backend": "nccl"}
+ 
+ 
++@pytest.mark.unit
++def test_compute_server_args_colocate_tensor_uses_ipc_weight_backend(vllm_args):
++    vllm_args.colocate = True
++    vllm_args.update_weight_transport = "tensor"
++    sa, _ = mod._compute_server_args(
++        vllm_args, rank=0, dist_init_addr=None, host="127.0.0.1", port=8000
++    )
++    assert sa["weight_transfer_config"] == {"backend": "ipc"}
++
++
++@pytest.mark.unit
++def test_compute_server_args_colocate_disk_uses_nccl_weight_backend(vllm_args):
++    vllm_args.colocate = True
++    vllm_args.update_weight_transport = "disk"
++    sa, _ = mod._compute_server_args(
++        vllm_args, rank=0, dist_init_addr=None, host="127.0.0.1", port=8000
++    )
++    assert sa["weight_transfer_config"] == {"backend": "nccl"}
++
++
+ @pytest.mark.unit
+ def test_build_vllm_subprocess_env_colocate(vllm_args, monkeypatch):
+     vllm_args.colocate = True
 diff --git a/vime/backends/megatron_utils/actor.py b/vime/backends/megatron_utils/actor.py
 index d752c065..419cacd4 100644
 --- a/vime/backends/megatron_utils/actor.py
@@ -162,6 +334,86 @@ index d752c065..419cacd4 100644
              self.sleep()
          elif self.args.offload_train:
              destroy_process_groups()
+diff --git a/vime/backends/megatron_utils/linear_logp_provider.py b/vime/backends/megatron_utils/linear_logp_provider.py
+index 47a95786..fa91cd73 100644
+--- a/vime/backends/megatron_utils/linear_logp_provider.py
++++ b/vime/backends/megatron_utils/linear_logp_provider.py
+@@ -17,6 +17,8 @@ import torch
+ 
+ logger = logging.getLogger(__name__)
+ _LOGGED_PROVIDER_IDENTITIES: set[tuple[str, str]] = set()
++_LOGGED_NATIVE_IDENTITIES: set[tuple[str, str, str]] = set()
++_NATIVE_CONTRACT_ID = "vime.native.linear_logp.v1"
+ 
+ ProviderMode = Literal["auto", "strict"]
+ TokenLayoutKind = Literal["single", "zigzag", "allgather"]
+@@ -202,7 +204,7 @@ def compute_linear_logp(
+ 
+     path = linear_logp_provider_path(args)
+     if path is None:
+-        return _native(request, native)
++        return _native(request, native, route="unconfigured")
+ 
+     mode = linear_logp_provider_mode(args)
+     try:
+@@ -211,7 +213,7 @@ def compute_linear_logp(
+         if mode == "strict":
+             raise RuntimeError(f"linear_logp provider {path!r} is unavailable: {exc}") from exc
+         logger.warning("linear_logp provider %s is unavailable; using native path: %s", path, exc)
+-        return _native(request, native)
++        return _native(request, native, route="provider_unavailable_fallback")
+     try:
+         result = provider(request)
+     except Exception as exc:
+@@ -220,7 +222,7 @@ def compute_linear_logp(
+         if mode == "strict":
+             raise RuntimeError(f"linear_logp provider {path!r} is unavailable: {exc}") from exc
+         logger.warning("linear_logp provider %s is unavailable; using native path: %s", path, exc)
+-        return _native(request, native)
++        return _native(request, native, route="provider_unavailable_fallback")
+ 
+     normalized = _normalize_result(result)
+     _validate_result(normalized, request, strict=mode == "strict")
+@@ -241,8 +243,10 @@ def _load_provider(path: str) -> LinearLogpProvider:
+ def _native(
+     request: LinearLogpRequest,
+     native: Callable[..., tuple[torch.Tensor, torch.Tensor | None]],
++    *,
++    route: str,
+ ) -> tuple[torch.Tensor, torch.Tensor | None]:
+-    return native(
++    result = native(
+         request.logits,
+         request.target_ids,
+         request.tensor_parallel_group,
+@@ -251,6 +255,27 @@ def _native(
+         chunk_size=request.chunk_size,
+         log_prob_keep_mask=request.log_prob_keep_mask,
+     )
++    _log_native_identity(native, route=route, device_type=request.logits.device.type)
++    return result
++
++
++def _log_native_identity(
++    native: Callable[..., Any], *, route: str, device_type: str
++) -> None:
++    module = getattr(native, "__module__", type(native).__module__)
++    qualname = getattr(native, "__qualname__", type(native).__qualname__)
++    backend_id = f"{module}.{qualname}"
++    identity = (backend_id, route, device_type)
++    if identity in _LOGGED_NATIVE_IDENTITIES:
++        return
++    _LOGGED_NATIVE_IDENTITIES.add(identity)
++    logger.info(
++        "linear_logp native active: backend_id=%s contract_id=%s route=%s device=%s",
++        backend_id,
++        _NATIVE_CONTRACT_ID,
++        route,
++        device_type,
++    )
+ 
+ 
+ def _is_provider_unavailable(exc: Exception) -> bool:
 diff --git a/vime/backends/megatron_utils/loss.py b/vime/backends/megatron_utils/loss.py
 index a33f1243..190a5c6c 100644
 --- a/vime/backends/megatron_utils/loss.py
@@ -316,7 +568,7 @@ index d970d658..13af54dc 100644
  
      args, _ = parser.parse_known_args()
 diff --git a/vime/backends/vllm_utils/vllm_engine.py b/vime/backends/vllm_utils/vllm_engine.py
-index 93b29fa9..7efacecc 100644
+index 7d239457..7efacecc 100644
 --- a/vime/backends/vllm_utils/vllm_engine.py
 +++ b/vime/backends/vllm_utils/vllm_engine.py
 @@ -530,12 +530,15 @@ def _normalize_vllm_wake_tags(tags: list[str] | None) -> list[str] | None:
@@ -338,6 +590,15 @@ index 93b29fa9..7efacecc 100644
      return tp, pp, dp
  
  
+@@ -630,7 +633,7 @@ def _compute_server_args(
+     ):
+         kwargs["max_model_len"] = args.rollout_max_context_len
+ 
+-    if args.colocate:
++    if args.colocate and getattr(args, "update_weight_transport", None) != "disk":
+         kwargs["weight_transfer_config"] = {"backend": "ipc"}
+     else:
+         kwargs["weight_transfer_config"] = {"backend": "nccl"}
 diff --git a/vime/ray/actor_group.py b/vime/ray/actor_group.py
 index ce091bd6..33c68bdb 100644
 --- a/vime/ray/actor_group.py

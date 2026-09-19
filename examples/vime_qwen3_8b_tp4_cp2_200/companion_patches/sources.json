@@ -1,9 +1,12 @@
 {
   "vime": {
     "repository": "https://github.com/RL-Align/vime.git",
-    "base": "1a113710e80aa7cfc271caa9bd90bcf348a7af08",
+    "base": "c80200e7aef08edc918e50a3998ea981bd689934",
     "tested_commit": "7ec5c0f0889ca6db742041dcd95f0fa1364c11a7",
-    "sha256": "5b0a9a56f91ff9c27fa3cebbd94a728b020268e9b10f52b6074e0732997da66c"
+    "sha256": "a7010a4408a10e2030d2a8bdf5ebae0f5db7ea2c6890cca4a867142a1ca41b37",
+    "tree": "7e6e4adfa887d58b7706174d30fd7e854c183c67",
+    "base_publicly_available": true,
+    "patch_applies_and_recreates_tree": true
   },
   "megatron": {
     "repository": "https://github.com/NVIDIA/Megatron-LM.git",
