@@ -644,6 +644,8 @@ def main(argv: list[str] | None = None) -> int:
         str(topology["rollout_cp"]),
         "--vllm-gpu-memory-utilization",
         str(vllm_gpu_memory_utilization),
+        "--vllm-logprobs-mode",
+        "processed_logprobs",
         *_mismatch_metrics_args(),
     ]
     if arm.framework_use_rollout_logprobs:
