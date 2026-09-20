@@ -124,6 +124,7 @@ def test_sparse_provider_reuses_logits_temperature_and_monitoring_entropy(monkey
     result = _provider_impl(request, linear_logp=Sparse())
     assert torch.equal(result.logp, torch.ones(3, 1))
     assert torch.equal(result.entropy, torch.full((3,), 2.0))
+    assert result.provenance["execution"]["top_p_replay"] is True
     assert result.provenance["execution"]["entropy"]["with_entropy_grad"] is False
 
 
