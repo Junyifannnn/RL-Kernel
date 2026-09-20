@@ -218,7 +218,7 @@ __global__ void __launch_bounds__(1) hip_sparse_nucleus_forward_kernel(
     entropy[row] = row_entropy;
 }
 
-template <typename scalar_t, int BlockSize>
+template <typename scalar_t, int BlockSize, bool FixedWidth = false>
 __global__ void __launch_bounds__(BlockSize) hip_sparse_nucleus_backward_kernel(
     const scalar_t* __restrict__ logits,
     const int64_t* __restrict__ ids,
@@ -233,6 +233,22 @@ __global__ void __launch_bounds__(BlockSize) hip_sparse_nucleus_backward_kernel(
     const int64_t row = static_cast<int64_t>(blockIdx.x);
     const int lane = static_cast<int>(threadIdx.x);
     if (row >= rows) return;
+    if constexpr (FixedWidth) {
+        // Historical 128-column backward: one element per lane, no dynamic loop.
+        const int64_t offset = row * BlockSize + lane;
+        if (!valid[offset]) {
+            grad_logits[offset] = static_cast<scalar_t>(0.0f);
+            return;
+        }
+        const float scale = inverse_temperature[row];
+        const float scaled = static_cast<float>(logits[offset]) * scale;
+        const float probability = sparse_exp(scaled - lse[row]);
+        const float selected = ids[offset] == targets[row] ? 1.0f : 0.0f;
+        const float gradient = scale *
+            (grad_result[row] * (selected - probability) + grad_lse[row] * probability);
+        grad_logits[offset] = static_cast<scalar_t>(gradient);
+        return;
+    }
     for (int64_t column = lane; column < columns; column += BlockSize) {
     const int64_t offset = row * columns + column;
     if (!valid[offset]) {
@@ -657,11 +673,19 @@ torch::Tensor hip_sparse_nucleus_logp_backward(
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(),
         "hip_sparse_nucleus_logp_backward", ([&] {
-            hip_sparse_nucleus_backward_kernel<scalar_t, Columns><<<rows, Columns, 0, stream>>>(
-                input.data_ptr<scalar_t>(), ids_c.data_ptr<int64_t>(), valid_c.data_ptr<bool>(),
-                targets_c.data_ptr<int64_t>(), inverse_c.data_ptr<float>(), lse_c.data_ptr<float>(),
-                grad_result_c.data_ptr<float>(), grad_lse_c.data_ptr<float>(),
-                grad.data_ptr<scalar_t>(), rows, columns);
+            if (columns == Columns) {
+                hip_sparse_nucleus_backward_kernel<scalar_t, Columns, true><<<rows, Columns, 0, stream>>>(
+                    input.data_ptr<scalar_t>(), ids_c.data_ptr<int64_t>(), valid_c.data_ptr<bool>(),
+                    targets_c.data_ptr<int64_t>(), inverse_c.data_ptr<float>(), lse_c.data_ptr<float>(),
+                    grad_result_c.data_ptr<float>(), grad_lse_c.data_ptr<float>(),
+                    grad.data_ptr<scalar_t>(), rows, columns);
+            } else {
+                hip_sparse_nucleus_backward_kernel<scalar_t, Columns><<<rows, Columns, 0, stream>>>(
+                    input.data_ptr<scalar_t>(), ids_c.data_ptr<int64_t>(), valid_c.data_ptr<bool>(),
+                    targets_c.data_ptr<int64_t>(), inverse_c.data_ptr<float>(), lse_c.data_ptr<float>(),
+                    grad_result_c.data_ptr<float>(), grad_lse_c.data_ptr<float>(),
+                    grad.data_ptr<scalar_t>(), rows, columns);
+            }
         }));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return grad;

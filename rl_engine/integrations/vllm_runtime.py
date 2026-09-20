@@ -1527,8 +1527,10 @@ def _patch_tokens_api_top_logprobs() -> None:
     except ModuleNotFoundError as exc:
         if not exc.name or not "vllm.entrypoints.serve.disagg".startswith(exc.name):
             raise
-        # vLLM 0.26 moved the tokens endpoint used by ROCm.
-        from vllm.entrypoints.scale_out.token_in_token_out.serving import ServingTokens
+        # The pinned vLLM 0.26 token-in/token-out endpoint already emits
+        # token_id:<id> entries. Keep its historical native serializer;
+        # rebuilding every returned entry here duplicates CPU work.
+        return
 
     if hasattr(ServingTokens, _STRICT_TOKENS_LOGPROBS_PATCH_MARKER):
         return

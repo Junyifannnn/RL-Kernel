@@ -1,0 +1,483 @@
+{
+  "scope": "Historical backward and native serializer alignment; no E2E rerun",
+  "backward": [
+    {
+      "dtype": "torch.float32",
+      "width": 3,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 3,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 3,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 65,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 65,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 65,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 128,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 128,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 128,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 129,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 129,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 129,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 513,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 513,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float32",
+      "width": 513,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 3,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 3,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 3,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 65,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 65,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 65,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 128,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 128,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 128,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 129,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 129,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 129,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 513,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 513,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.bfloat16",
+      "width": 513,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 3,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 3,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 3,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 65,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 65,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 65,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 128,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 128,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 128,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 129,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 129,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 129,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 513,
+      "temperature": 0.3,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 513,
+      "temperature": 0.7,
+      "bitwise_equal": true
+    },
+    {
+      "dtype": "torch.float16",
+      "width": 513,
+      "temperature": 1.6,
+      "bitwise_equal": true
+    }
+  ],
+  "timings": [
+    {
+      "rows": 4096,
+      "width": 128,
+      "samples_ms": {
+        "before": [
+          0.004338495135307312,
+          0.0043320849537849425,
+          0.004298605024814606,
+          0.004295400083065033,
+          0.004314840137958527,
+          0.004299004971981049
+        ],
+        "after": [
+          0.0042156150937080385,
+          0.004207195043563843,
+          0.004230245053768158,
+          0.004235259890556335,
+          0.004217014908790589,
+          0.004220224916934967
+        ]
+      },
+      "median_ms": {
+        "before": 0.004306922554969788,
+        "after": 0.004218619912862778
+      }
+    },
+    {
+      "rows": 4096,
+      "width": 159,
+      "samples_ms": {
+        "before": [
+          0.004651010036468506,
+          0.004667445123195648,
+          0.004631564915180206,
+          0.004621945023536682,
+          0.004621140062808991,
+          0.004601894915103912
+        ],
+        "after": [
+          0.0046550148725509645,
+          0.004636175036430359,
+          0.004612925052642822,
+          0.004642989933490754,
+          0.004626150131225586,
+          0.0046646401286125185
+        ]
+      },
+      "median_ms": {
+        "before": 0.0046267549693584445,
+        "after": 0.004639582484960556
+      }
+    },
+    {
+      "rows": 8192,
+      "width": 128,
+      "samples_ms": {
+        "before": [
+          0.0068576401472091675,
+          0.006823559999465942,
+          0.006853029727935791,
+          0.006798704862594604,
+          0.006915745139122009,
+          0.006833364963531494
+        ],
+        "after": [
+          0.00675280511379242,
+          0.0066848498582839965,
+          0.006741575002670288,
+          0.0067317551374435425,
+          0.006727725267410278,
+          0.006774230003356934
+        ]
+      },
+      "median_ms": {
+        "before": 0.006843197345733642,
+        "after": 0.006736665070056915
+      }
+    },
+    {
+      "rows": 8192,
+      "width": 159,
+      "samples_ms": {
+        "before": [
+          0.007113199830055237,
+          0.007031815052032471,
+          0.007069100141525269,
+          0.007034220099449158,
+          0.007059680223464966,
+          0.007023195028305054
+        ],
+        "after": [
+          0.007022594809532165,
+          0.0071154099702835085,
+          0.007114005088806152,
+          0.007058075070381165,
+          0.0071446698904037475,
+          0.007127029895782471
+        ]
+      },
+      "median_ms": {
+        "before": 0.007046950161457062,
+        "after": 0.00711470752954483
+      }
+    }
+  ],
+  "source_sha256": {
+    "csrc/hip/hip_deterministic_logp_kernel.hip": "87009bc436b4bbc7cc3664fc328163ff789c827a1a6e6a1109f13dbc3c027666",
+    "rl_engine/integrations/vllm_runtime.py": "ee5c7a4769c6f55d76cbdbd476dda76576f31184de2d98f9fbd49ff879e89e8d",
+    "tests/test_vllm_tokens_serializer.py": "54575b291617371b5e3c15262ce8a9c904fc342dec13a5e2f39b1b69c2384028"
+  },
+  "serializer": {
+    "tokens": 6912,
+    "top_logprob_limit": 1,
+    "payloads_equal": true,
+    "native_method_identity_preserved": true,
+    "samples_seconds": {
+      "before": [
+        0.05369023000821471,
+        0.2183377780020237,
+        0.052500627003610134,
+        0.20046321488916874,
+        0.04999600909650326,
+        0.20455634593963623
+      ],
+      "after": [
+        0.037924530915915966,
+        0.03728094091638923,
+        0.04147493792697787,
+        0.03573354706168175,
+        0.03942220378667116,
+        0.037077554035931826
+      ]
+    },
+    "median_seconds": {
+      "before": 0.12707672244869173,
+      "after": 0.037602735916152596
+    },
+    "controlled_gc_timing": {
+      "gc_policy": "collect before each measurement, disable cyclic GC inside timing; destroy output outside timing",
+      "samples_seconds": {
+        "before": [
+          0.05081655690446496,
+          0.04814130812883377,
+          0.04977289494127035,
+          0.04757959395647049,
+          0.04801094392314553,
+          0.05058916984125972,
+          0.050809923093765974,
+          0.05056815780699253
+        ],
+        "after": [
+          0.03341142367571592,
+          0.035502423997968435,
+          0.03268550289794803,
+          0.03266023984178901,
+          0.0331713086925447,
+          0.03448666399344802,
+          0.03466166788712144,
+          0.03620483074337244
+        ]
+      },
+      "median_seconds": {
+        "before": 0.05017052637413144,
+        "after": 0.03394904383458197
+      }
+    }
+  },
+  "tests": {
+    "returncode": 0,
+    "output": ".............................................                            [100%]\n45 passed in 4.57s\n"
+  },
+  "limitations": [
+    "No new E2E run; these local corrections cannot be claimed to recover the 16.30-second screenshot gap.",
+    "GPU timings use one GPU with other idle-memory processes present; sub-microsecond deltas are not an E2E guarantee.",
+    "Screenshot 71.8858/55.5841 seconds came from a subsequently withdrawn sparse-graph experiment, not the current published source."
+  ],
+  "local_tests": {
+    "passed": 14,
+    "scope": "tokens serializer and worker top-p replay"
+  },
+  "historical_source_seals": {
+    "rl_kernel": {
+      "path": "/workspace/pr400-stability-zhe-20260915/source-main-1d742b1c/rl-kernel",
+      "recorded_revision": "1d742b1ccb2eeef8a9edc73127f20a04a013c5f0",
+      "current_revision": "1d742b1ccb2eeef8a9edc73127f20a04a013c5f0",
+      "recorded_diff_sha256": "c84b5ce3c1bdbf5b89e19c903715d7bb02e9749d933606cb650a7b252ce7ae4b",
+      "current_diff_sha256": "c84b5ce3c1bdbf5b89e19c903715d7bb02e9749d933606cb650a7b252ce7ae4b",
+      "historical_seal_matches": true
+    },
+    "vime": {
+      "path": "/workspace/pr400-stability-zhe-20260915/source-v5/vime",
+      "recorded_revision": "c80200e7aef08edc918e50a3998ea981bd689934",
+      "current_revision": "c80200e7aef08edc918e50a3998ea981bd689934",
+      "recorded_diff_sha256": "3c9eae5a11dc09757bf4a8b4ce9e861c65b83e2bb0ef5d3cc5d95e6ae7cc4a18",
+      "current_diff_sha256": "3c9eae5a11dc09757bf4a8b4ce9e861c65b83e2bb0ef5d3cc5d95e6ae7cc4a18",
+      "historical_seal_matches": true
+    },
+    "megatron": {
+      "path": "/workspace/pr400-stability-zhe-20260915/source-v5/megatron",
+      "recorded_revision": "1dcf0dafa884ad52ffb243625717a3471643e087",
+      "current_revision": "1dcf0dafa884ad52ffb243625717a3471643e087",
+      "recorded_diff_sha256": "6a9cf5de9697c92da1f7a1de9bbd0364a5074cf59102360304a88381ef837d27",
+      "current_diff_sha256": "6a9cf5de9697c92da1f7a1de9bbd0364a5074cf59102360304a88381ef837d27",
+      "historical_seal_matches": true
+    }
+  },
+  "comparison_base": "1ab26ec7b4ac15e33c62599cc3f7dd2ddf82b0c6"
+}
