@@ -639,7 +639,11 @@ def paged_attention_forward(
     split_options = _COMPILE_OPTIONS
     if max_seqlen_q * group <= 16:
         common["BLOCK_M"] = 16
-        split_options = {**_COMPILE_OPTIONS, "num_warps": 2}
+        split_options = {
+            **_COMPILE_OPTIONS,
+            "num_warps": 2,
+            "schedule_hint": "attention,memory-bound-attention",
+        }
     num_chunks = triton.cdiv(int(block_table.size(1)) * PAGE_SIZE, CHUNK_KV)
     pm = torch.empty((num_chunks, total_q, num_q_heads), dtype=torch.float32, device=q.device)
     pl = torch.empty_like(pm)

@@ -1484,6 +1484,38 @@ def _patch_qwen3_strict_model(
         attention_cls.forward = strict_attention_forward
 
 
+def _patch_rocm_top_p_scan(integration: VllmIntegration) -> None:
+    # The exact scan mirrors the validated ATen version's reduction tree.
+    if not torch.__version__.split("+")[0].startswith("2.12."):
+        return
+    from vllm.v1.sample.ops import topk_topp_sampler
+
+    from rl_engine.kernels.ops.triton.top_p_scan import apply_top_k_top_p
+
+    original = topk_topp_sampler.apply_top_k_top_p_pytorch
+    if hasattr(original, _PATCH_MARKER):
+        return
+
+    def wrapped(logits, k, p, allow_cpu_sync=False):
+        # Single-row CUB and large-batch vLLM Triton scans have different
+        # arithmetic contracts. Keep those native routes intact.
+        if (
+            p is None or not logits.is_cuda or logits.dtype != torch.float32
+            or not 2 <= logits.size(0) < 8 or logits.size(1) < 4096
+            or not str(torch.cuda.get_device_properties(logits.device).gcnArchName).startswith(
+                "gfx942"
+            )
+        ):
+            return original(logits, k, p, allow_cpu_sync=allow_cpu_sync)
+        return apply_top_k_top_p(logits, k, p)
+
+    setattr(wrapped, _PATCH_MARKER, original)
+    topk_topp_sampler.apply_top_k_top_p_pytorch = wrapped
+    integration.record_installed_hook(
+        "logp", "vllm.v1.sample.ops.topk_topp_sampler.apply_top_k_top_p_pytorch"
+    )
+
+
 def _patch_sampler(integration: VllmIntegration, *, strict_linear_logp: bool) -> None:
     from vllm.v1.sample.sampler import Sampler
 
@@ -1812,6 +1844,8 @@ def install_vllm_integration(plan: IntegrationPlan) -> VllmIntegration:
         _patch_rocm_weight_cache_refresh()
     _patch_qwen3_layer_alignment_diagnostics()
     if strict_linear_logp:
+        if torch.version.hip is not None:
+            _patch_rocm_top_p_scan(integration)
         _patch_tokens_api_top_logprobs()
         _patch_qwen_lm_head_padding()
         _patch_strict_lm_head_linear()

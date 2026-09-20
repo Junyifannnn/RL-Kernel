@@ -46,68 +46,80 @@ token workload and warmup policy.
 
 ## Current measured path
 
-The latest controlled comparison used the command above with `--steps 3`,
-on eight MI300X GPUs, PyTorch 2.12 / ROCm 7.14 and Qwen3-8B. Both arms used
-the same prompts, seeds, sampling and training settings, inherited CPU affinity,
-and independent training logprob recomputation. The native arm changes only
-`--mode native`. Generated lengths differ between implementations.
+The latest strict run used the command above with `--steps 3`, on eight
+MI300X GPUs, PyTorch 2.12 / ROCm 7.14 and Qwen3-8B. The previous strict and
+native measurements used the same environment, prompts, seeds, sampling and
+training settings, inherited CPU affinity, and no rollout-logprob reuse.
+The native arm changes only `--mode native`; its timings are an earlier
+reference, not a newly paired end-to-end run. Generated trajectories differ.
 
-| Three-step measurement | Native | Strict |
-|---|---:|---:|
-| Mean rollout seconds | 39.8674 | 44.1356 |
-| Mean training seconds | 14.1679 | 16.7198 |
-| Mean step seconds | 55.5846 | 62.7527 |
-| Response tokens | 129,391 | 129,868 |
-| End-to-end tok/GPU/ms | 0.096993 | 0.086230 |
-| Mean step seconds, excluding step 0 | 54.2528 | 63.9601 |
+| Three-step measurement | Native reference | Previous strict | Current strict |
+|---|---:|---:|---:|
+| Mean rollout seconds | 39.8674 | 44.1356 | 42.0642 |
+| Mean training seconds | 14.1679 | 16.7198 | 16.6432 |
+| Mean step seconds | 55.5846 | 62.7527 | 60.6998 |
+| Response tokens | 129,391 | 129,868 | 130,890 |
+| End-to-end tok/GPU/ms | 0.096993 | 0.086230 | 0.089848 |
 
-Strict is 12.90% slower in mean step time (17.89% excluding step 0).
-This does **not** reproduce the historical 0.2% difference. Native completed
-all three steps, but its validation reports a missing compiled FFN execution
-record; its timings remain provisional until that evidence gap is resolved.
-The strict run passed validation and a raw FP32-bit audit: 129,868 distinct
-logprobs, 519,472 including TP replicas, and zero mismatches.
+The latest increment improves rollout by 4.69% and step time by
+3.27% relative to the previous strict checkout. Step 0's token
+multiset matches; later trajectories differ (130,890 vs 129,868
+response tokens), so these are end-to-end observations rather than identical
+workload timings. A fresh fixed-workload pair, with four 3072-token prefixes
+and 256 generated tokens each, measured **1.9106 -> 1.8264 seconds
+(-4.41%)**, with identical token IDs and 5,120 raw logprob-bit comparisons.
+These fixed-workload numbers measure rollout, not training step time.
 
-The retained decode changes fuse eager RMSNorm/residual addition, combine
-Q/K normalization with RoPE, fuse GEMM chunk reduction with SwiGLU, and use
-a smaller split Attention query tile. Small-batch GEMMs use narrower tiles and
-unroll complete QKV/down-projection chunks without reordering accumulation.
-Single-token decode also avoids materializing an identity sequence-index tensor
-for every Attention layer. Other batches and supplied mappings retain their path.
-They preserve the intermediate BF16 rounding and reduction order. The
-normalization shortcuts are restricted to the verified PyTorch/gfx942
-contract and fall back on unsupported inputs. Sampling parameters and
-training/rollout parallelism remain configurable.
+Strict remains 9.20% slower in mean step time than the native reference
+(12.97% excluding step 0). Native completed all three steps but lacks the
+compiled FFN execution record, so that reference remains provisional. The
+historical 0.2% difference is neither reproduced nor guaranteed.
 
-The preceding simplified strict checkout measured 70.3220 seconds/step and
-52.4108 seconds/rollout under the same settings. The current run is 10.76%
-faster per step and 15.79% faster in rollout. The immediately preceding fusion
-baseline measured 65.1766 seconds/step and 47.1067 seconds/rollout: this increment
-improves step time by 3.72% and rollout by 6.31%. Step 0's generated token multiset
-matches that baseline; later trajectories differ (129,868 vs 129,575 total response
-tokens), so these are end-to-end observations rather than fixed-workload timings.
-A separate fixed-workload rollout comparison (four 3072-token prefixes,
-256 generated tokens each, TP4, temperature 0.7, top-p 0.95) measured
-2.0413 -> 1.9044 seconds for the immediately preceding fusion baseline and the
-current path, a 6.70% reduction, with identical output token IDs and 5,120 raw
-logprob-bit comparisons. These are rollout timings, not training step times.
-The earlier simplified baseline took 2.2479 seconds, and native took 1.6668 seconds
-on that fixed workload in earlier runs.
+The current strict run passed source sealing and validation. Raw FP32 audit:
+**130,890 distinct logprobs / 523,560 including TP replicas,
+zero mismatches**. Training recomputes logprobs independently.
 
-The SwiGLU fusion initially measured slower in rollout. Full-model tracing
-confirmed 2,304 fewer launches per rank; same-process alternating FFN/communication
-replay improved 42.0290 -> 39.8478 microseconds, and a reversed-order rollout
-recheck improved 2.0537 -> 2.0079 seconds with identical token and logprob bits.
-IPC completion fusion remained slower after implementation review and is excluded.
-IPC collectives remain unchanged.
+### Retained kernel changes
 
-The expanded GPU/integration suite reports 130 passed, one skipped and one
-existing integer-square-bin kernel-loading failure (HIP status 500), reproduced
-on the unchanged baseline. Five separate SwiGLU graph tests pass, including
-changed inputs and weights. Raw traces and experiment scripts stay outside the
-repository. These checks do not establish a new full parallelism matrix or
-a 200-step performance guarantee.
+The existing path fuses eager RMSNorm/residual addition, Q/K normalization
+with RoPE, and GEMM chunk reduction with SwiGLU. Smaller decode tiles,
+guarded QKV/down chunk unrolling and the Attention identity-index shortcut
+preserve BF16 rounding and reduction order.
 
-The incremental GEMM/Attention/SwiGLU suite reports 46 passed, including default
-GEMM dispatch across batch sizes and Attention graph replay with changed queries
-and sequence lengths. This suite overlaps the earlier tests; counts are not additive.
+The latest increment changes instruction scheduling for small split Attention
+tiles and accelerates the small-batch top-p cumulative scan. The scan computes
+independent Sklansky subtrees in parallel, propagates the carry along the
+original left spine, then reconstructs each prefix with the original addition
+order. Sorting, softmax, top-p thresholding and random sampling retain their
+native semantics. There is no nucleus support cap or fixed sampling parameter.
+
+The scan shortcut is guarded to the verified PyTorch 2.12 / gfx942 FP32 path,
+batch sizes 2–7 and vocabulary sizes at least 4096. Single-row CUB, large-batch
+vLLM Triton and unsupported inputs retain their native implementations. The
+README command enables the shortcut automatically; no extra flag is required.
+Temperature, top-p and existing training/rollout topology controls are unchanged.
+
+Uninstrumented operator tests measured the scan at 281.29 -> 54.55 microseconds
+for batch 4 and vocabulary 152,064, with exact raw bits. Attention-only paired
+rollout checks improved 2.04% and 1.72% in opposite run orders. Adding the scan
+improved a separate pair by 3.68%; the combined fresh pair above is the retained
+end-to-end rollout estimate, rather than adding those percentages together.
+The full-model trace confirms both new paths execute. Over the same final 63
+decode graph replays, cumulative Attention partial time fell 51.30 -> 45.65 ms
+(VGPR count 104 -> 88), and scan time fell 20.20 -> 3.60 ms across its three
+kernels. These profiled attribution numbers are separate from wall time.
+Explicit Gluon rewrites, transposed QK and alternate scan-carry loading were
+excluded after correctness or performance checks. IPC collectives are unchanged.
+
+### Validation scope
+
+The combined GEMM/Attention/SwiGLU/scan GPU suite reports **77 passed**. Tests
+include changed-input graph replay, raw scan bits, top-p boundary values,
+per-row top-p/top-k, temperatures 0.2/0.7/1.0/1.8 and native fallback dispatch.
+The CPU sampling/integration suite reports **35 passed**.
+
+The earlier expanded GPU/integration suite had 130 passed, one skipped and
+one existing integer-square-bin kernel-loading failure (HIP status 500), also
+reproduced on the unchanged baseline. Counts across suites overlap. This
+increment is not a new full topology matrix or 200-step acceptance run.
+Raw traces and experiment scripts stay outside the repository.
