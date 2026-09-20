@@ -154,7 +154,10 @@ logprobs and Triton chunked Attention with sparse logp/monitoring-entropy scorin
 Another measured cost remains: complete top-p support transport reads a GPU
 scalar via `finite_counts.max().item()` on each decode step. In short dual-TP4
 replays, fixed-size transport with and without that synchronization took 4.2738
-and 3.8455 seconds (10.02% less). This is diagnostic evidence, not a production
+and 3.8455 seconds (10.02% less). **Correction:** those standalone replays did
+not explicitly select the vLLM 0.26 Attention backend and executed native paged
+Attention. That percentage cannot be applied directly to the README Triton
+route. The corrected Triton causal comparison is linked below. This is diagnostic evidence, not a production
 64-token cap or a percentage to add to the full-run affinity gain. Arbitrary
 top-p and complete support remain supported; this change does not remove that
 synchronization. Native FFN provenance and the historical performance target
@@ -250,8 +253,10 @@ the same workers. Each replica generated four fixed 3072-token prefixes plus
 support and the same CPU allocation. In baseline/aligned/aligned/baseline
 order, with warmups and six measurements per variant, mean paired maximum
 replica time was **4.2913 / 4.3022 seconds (+0.25%)**. All 24 replay outputs
-had matching token/selected-logprob digests within their replica. There is
-no demonstrated rollout speedup from this kernel change in this workload.
+had matching token/selected-logprob digests within their replica. **Correction:**
+this standalone replay also used native paged Attention because explicit backend
+selection was missing. It is not a timing measurement of the README Triton route.
+There is no demonstrated rollout speedup from this kernel change in that workload.
 
 No new end-to-end training result or 200-step performance advantage is claimed.
 Historical G11/G10 first-three-step means were 98.3222/90.6144 seconds (+8.506%),
@@ -278,3 +283,25 @@ with one Windows symlink skip. All three companion patches still reconstruct
 their recorded source trees. This is source and correctness validation, not
 evidence that the historical 0.2% step-time result has been reproduced. See the
 [scoped audit](../validation/rocm-readme-20260920/historical-only-alignment-audit.json).
+
+### Corrected causal rollout comparison
+
+With actual Triton Attention verified on all 36 layers, changing only the
+historical worker's top-p transport from capacity 64 to complete dynamic support
+increased fixed replay time **4.4561 to 4.7870 seconds (+7.43%)**. Current
+RL-Kernel with matching transport measured 4.7314 seconds on the other TP4 GPU
+group. Tokens and selected logprobs matched exactly. The intervention changes
+both per-token synchronization and payload width; it does not isolate `.item()`
+alone. Current native also uses dynamic support. The historical sampler cap
+cannot be restored without restricting valid sampling inputs.
+
+Restoring just the historical Python scorer wrapper did not reduce time.
+Historical strict rollout itself measured 4.5291 seconds versus 3.4026 for current
+native in another six-repeat fixed-length replay. This is neither a full old
+G10 environment reconstruction nor an E2E benchmark. The native FFN provenance
+gap remains. It demonstrates that restoring the old RL-Kernel source alone did
+not recover the historical 0.2% comparison on this workload.
+
+No training rerun or new production optimization was added. Default reuse remains
+off, and sampling/topology remain configurable. See the [causal source analysis](../validation/rocm-readme-20260920/historical-active-path-diff.md)
+and [raw timings, sources and runtime evidence](../validation/rocm-readme-20260920/causal-rollout-audit.json).

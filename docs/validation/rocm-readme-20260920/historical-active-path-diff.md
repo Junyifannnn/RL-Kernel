@@ -1,5 +1,119 @@
 # Historical G11 versus the current active execution path
 
+## Causal follow-up at 8335f6e
+
+The strongest newly measured rollout regression is complete dynamic top-p
+support transport. In the same historical worker, switching **only** transport
+from fixed capacity 64 plus a GPU overflow assertion to the current dynamic
+implementation increased a fixed replay from **4.4561 to 4.7870 seconds
+(+7.43%)**. Generated tokens and selected-logprob bytes were unchanged.
+
+The active code is `vllm/v1/worker/gpu/sample/sampler.py`, supplied by
+`examples/vime_rocm_attention_ablation/companion_patches/vllm.patch`:
+
+```python
+# Historical corroborating sampler
+finite_counts = torch.isfinite(processed_logits).sum(dim=-1)
+torch._assert_async(torch.all(finite_counts <= replay_cap), "support overflow")
+num_logprobs = replay_cap  # default 64
+
+# Current sampler, before compute_topk_scores(..., num_logprobs, ...)
+finite_counts = torch.isfinite(logits).sum(dim=-1)
+num_logprobs = int(finite_counts.max().item())
+```
+
+The current path makes the host wait for a GPU scalar before selecting the
+top-k result width on each decode iteration. Both the synchronization and
+output width change in this intervention; **7.43% is not an isolated `.item()`
+measurement**. The current native sampler also uses dynamic support, so this
+does not attribute the entire strict/native gap. Restoring the historical cap
+would reject valid wider nuclei and does not satisfy unrestricted sampling.
+
+### Actual Triton route and diagnostic correction
+
+The earlier standalone trace/sync/sparse-forward replays passed only the legacy
+`VLLM_ATTENTION_BACKEND` environment variable. On the installed vLLM 0.26 this
+did not select the overridden backend. The r6 trace contains
+`paged_attention_ll4mi` kernels, and its readbacks lack Attention execution
+evidence. Consequently their reported 10.02% sync reduction and +0.25%
+sparse-forward replay result **cannot be applied directly to the README Triton
+route**. The isolated HIP operator tests remain valid.
+
+This is a standalone diagnostic error: historical G11 and the README E2E
+readbacks both confirm Triton Attention. The corrected replays explicitly pass
+`attention_backend="ROCM_AITER_FA"`, verify all 36 layers use
+`RlKernelAttentionImpl`, and require actual `triton_chunked_flash_attention`
+execution provenance. The profiling helper now makes this selection explicit
+and rejects a bypassed or unobserved route before profiling. Four route tests
+passed; sampling parameters are exposed on its CLI.
+
+### Controlled source and sampler comparisons
+
+All replays use two TP4 replicas, four saved 3072-token prefixes per replica,
+512 new tokens, temperature 0.7/top-p 0.95 and `AMD_CPU_AFFINITY=0`.
+Sampler/source interventions use six measurements per variant in symmetric
+order, after warmup. They do not run training or HTTP serving, and therefore
+do not measure step time or the rollout-logprob reuse option.
+
+| Rollout source | Support transport | Mean seconds |
+|---|---|---:|
+| Historical RL-Kernel and compiled extension | Historical capacity 64 | 4.4561 |
+| Same historical workers | Current dynamic transport | 4.7870 |
+| Current published RL-Kernel | Current dynamic transport | 4.7314 |
+
+The current source's unchanged control measured 4.7128 seconds. The historical
+and current source arms ran on different four-GPU groups; their roughly 1.2%
+difference with matched transport is not a controlled sub-percent comparison.
+It does show no large additional Attention/FFN source regression on this workload.
+All these variants produced identical token and selected-logprob digests.
+Historical RL-Kernel is sealed, but historical vLLM is not: its two corroborating
+capacity-64 sampler files were used in an isolated copy of current vLLM. This
+reconstructs the transport difference, not the complete old software environment.
+
+A separate same-worker intervention on the current strict source measured:
+
+| Scoring variant | Mean paired maximum replica seconds |
+|---|---:|
+| Current | 4.8005 |
+| Historical Python scoring wrapper only | 4.8104 |
+| Historical wrapper and capacity-64 transport | 4.4860 |
+| Native sampler output, strict rescoring bypassed for diagnosis | 4.3563 |
+
+Replacing the wrapper alone did not help. Bypassing strict rescoring reduced
+time by 9.25%, but also changed selected logprobs and is not a valid production
+fix. Strict rescoring already existed historically. These overlapping
+interventions must not be added together.
+
+### Why the historical 0.2% is not recovered by a code rollback
+
+A further six-repeat fixed-length replay measured **3.4026 seconds for current
+native versus 4.5291 seconds for historical strict (+33.11%)**. This comparison
+uses different GPU groups and native token trajectories; native FFN execution
+provenance remains incomplete. It is not a certified reconstruction of old G10.
+Nevertheless the historical strict source itself does not reproduce a 0.2%
+advantage against the current native runtime in this workload. The difference
+cannot all be assigned to new PR code or to disabling logprob reuse.
+
+The historical -0.2069% was an average over 200 different training trajectories.
+At the 87 matching step indices where both arms generated eight full-length
+6912-token responses, historical G10/G11 mean step times were **105.3212 /
+108.4156 seconds (+2.94%)**, rollout **87.0622 / 74.7846**, and training
+**15.4227 / 30.2255**. This post-hoc length match does not equalize token contents
+or establish causality, but shows that -0.2% is not a constant implementation
+advantage. Historical CPU-affinity telemetry is unavailable; no historical CPU
+bottleneck is inferred.
+
+Canonical CP gradient gathering/reordering remains a concrete training-side
+code difference, as detailed below. Its independent timing has not been measured
+in this follow-up. The **entire E2E gap is not yet attributed**, and the same-
+environment G10 step-time target remains unmet. No production kernel changes,
+sampling limits or additional optimization mechanisms were introduced here.
+
+Raw samples, digests, worker provenance, source seals and the exact diagnostic
+scripts are in [causal-rollout-audit.json](causal-rollout-audit.json).
+
+## Earlier source audit and small alignment fixes
+
 Compared the sealed historical G11 RL-Kernel, VIME and Megatron sources with
 PR #437 at `1ab26ec`, including newly added files. All three historical revision
 and dirty-diff seals match. The historical vLLM checkout is corroborating evidence
