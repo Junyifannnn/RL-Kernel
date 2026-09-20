@@ -480,10 +480,11 @@ if _TRITON_AVAILABLE:
         CHUNK: tl.constexpr,
         D: tl.constexpr,
         WRITE_LSE: tl.constexpr,
+        IDENTITY_SEQ: tl.constexpr = False,
     ):
         tok = tl.program_id(0).to(tl.int64)
         head = tl.program_id(1)
-        seq = tl.load(seq_of_token_ptr + tok)
+        seq = tok if IDENTITY_SEQ else tl.load(seq_of_token_ptr + tok)
         kv_len = tl.load(seqlen_k_ptr + seq)
         num_chunks = tl.cdiv(kv_len, CHUNK)
         offs_d = tl.arange(0, D)
@@ -676,7 +677,8 @@ def paged_attention_forward(
         **common,
         **split_options,
     )
-    if seq_of_token is None:
+    identity_seq = seq_of_token is None and total_q == batch and max_seqlen_q == 1
+    if seq_of_token is None and not identity_seq:
         if total_q == batch:
             seq_of_token = torch.arange(total_q, dtype=torch.int32, device=q.device)
         else:
@@ -703,6 +705,7 @@ def paged_attention_forward(
         CHUNK=CHUNK_KV,
         D=HEAD_DIM,
         WRITE_LSE=return_lse,
+        IDENTITY_SEQ=identity_seq,
         num_warps=1,
         enable_fp_fusion=False,
     )
