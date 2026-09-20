@@ -157,6 +157,9 @@ The historical 200-step result was 62.47 vs 59.70 end-to-end tok/GPU/s
 generated different token counts. This is a reference measurement, not a
 performance guarantee for the current no-reuse command or other topologies.
 See [ROCm performance reproduction](./docs/usage/rocm-sparse-performance.md).
+The current no-reuse three-step check passed strict bitwise validation and measured
+3.39% lower pooled throughput (5.47% excluding the first step). Native FFN execution
+readback is incomplete, so this short performance comparison remains provisional.
 
 On CUDA, rollout CP and top-k are configurable too; this short check performs
 two real updates and validates their artifacts:

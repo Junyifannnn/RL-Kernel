@@ -55,3 +55,44 @@ is a guarantee for a new source revision, no-reuse run, sampling configuration
 or topology. New performance claims require an unprofiled native/strict pair;
 record token counts and warmup policy alongside timing. Profiler runs must be
 kept separate from throughput runs.
+
+## No-reuse smoke validation, September 20
+
+The command above was run with `--steps 3` for each arm on eight MI300X GPUs.
+The strict run passed the complete validator: 130,890 distinct selected logprobs
+matched bit for bit, with maximum absolute difference zero. A separate raw audit
+also found zero mismatches in all 523,560 stored values including TP replicas.
+Backend readbacks and before/after source fingerprints passed. The reuse flag
+was zero in both launches; temperature and top-p were 0.7 and 0.95.
+
+| Three-step measurement | Native | Strict |
+|---|---:|---:|
+| Response tokens | 136,086 | 130,890 |
+| Total step seconds | 426.2328 | 424.3251 |
+| Mean rollout seconds | 108.0953 | 103.7735 |
+| Mean training seconds | 30.7289 | 33.8964 |
+| End-to-end tok/GPU/ms | 0.039910 | 0.038558 |
+| End-to-end tok/ms, eight GPUs | 0.319276 | 0.308466 |
+
+The pooled strict/native difference was **-3.39%** including every step and
+**-5.47%** after excluding each arm's first step. Model startup is outside the
+step timer; lazy compilation remains inside it. These are different generated
+trajectories and only three steps, so neither establishes 200-step performance.
+
+The native training job completed, but its artifact validator reported a missing
+vLLM rollout FFN execution record (zero recorded calls). Its timing is therefore
+provisional: native provenance validation did **not** pass. The strict run's
+provenance and bitwise checks did pass. This change does not establish a new
+all-topology or all-sampling-parameter matrix, and does not include a new trace
+or an ablation assigning speedup to individual kernels.
+
+Targeted tests: **54 passed**, including GPU support widths 3/65/129/513,
+forward/backward numerical checks, batching/padding bit equality, and the
+applied VIME adapter's temperature and native-mask contracts. All three companion
+patches reproduce the recorded Git trees from their bases. The training adapter
+keeps sparse logits unscaled until the shared HIP scorer; pre-scaling them in
+the framework caused FP32 rounding differences and was corrected before this run.
+
+See the [machine-readable measurements](../validation/rocm-readme-20260920/readme-pair-audit.json)
+and [tested source mapping](../validation/rocm-readme-20260920/tested-source-equivalence.json).
+Runtime Python differences in that mapping are formatting only (equal ASTs).

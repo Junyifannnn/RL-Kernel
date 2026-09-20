@@ -1,0 +1,133 @@
+{
+  "scope": "8 MI300X, Qwen3-8B, training TP4 CP2 / rollout TP4 CP1; 3 steps per arm",
+  "rollout_logprob_reuse": false,
+  "warmup_policy": "All three measured steps included; model startup excluded by step timer.",
+  "performance_limit": "Short smoke comparison, different generated trajectories, not a 200-step or steady-state guarantee.",
+  "parameters": {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "lr": 5e-07,
+    "kl_coef": 0.01,
+    "max_response_len": 6912,
+    "grpo_std_normalization": "disabled",
+    "samples_per_step": 8
+  },
+  "runs": {
+    "consistency": {
+      "run_dir": "/app/model/rocm-readme-20260920/runs/consistency-3step-r4",
+      "validation_passed": true,
+      "errors": [],
+      "strict_bitwise": {
+        "bitwise_equal": true,
+        "bitwise_mismatch_count": 0,
+        "element_count": 130890,
+        "max_abs_diff": 0.0
+      },
+      "source_and_config_fingerprint": "6306f8310bae372dbe800d4f421aa5d1de36e8c6e405b76dd58db09d913ef20d",
+      "reuse_environment": "0",
+      "attention_backend": "triton",
+      "sparse_replay": "1",
+      "framework_readbacks_passed": true,
+      "frozen_sources_match": true,
+      "step_metrics": [
+        {
+          "step": 0,
+          "response_tokens": 35878,
+          "perf/step_time": 131.80918526649475,
+          "perf/rollout_time": 86.26026844978333,
+          "perf/train_time": 42.289413928985596,
+          "train/train_rollout_logprob_abs_diff": 0.0
+        },
+        {
+          "step": 1,
+          "response_tokens": 39716,
+          "perf/step_time": 124.66480922698975,
+          "perf/rollout_time": 91.24366402626038,
+          "perf/train_time": 29.57894515991211,
+          "train/train_rollout_logprob_abs_diff": 0.0
+        },
+        {
+          "step": 2,
+          "response_tokens": 55296,
+          "perf/step_time": 167.85113310813904,
+          "perf/rollout_time": 133.81663274765015,
+          "perf/train_time": 29.8206946849823,
+          "train/train_rollout_logprob_abs_diff": 0.0
+        }
+      ],
+      "total_response_tokens": 130890,
+      "total_step_seconds": 424.32512760162354,
+      "mean_step_seconds": 141.44170920054117,
+      "mean_rollout_seconds": 103.77352174123128,
+      "mean_train_seconds": 33.89635125796,
+      "pooled_e2e_tokens_per_gpu_per_second": 38.55828687892534,
+      "pooled_e2e_tokens_per_gpu_per_ms": 0.03855828687892534,
+      "pooled_e2e_tokens_per_ms_8gpu": 0.3084662950314027,
+      "excluding_first_step_tokens_per_gpu_per_second": 40.6012058870739,
+      "inference_jit_warning_count": 2,
+      "independent_raw_audit": {
+        "values_including_tp_duplicates": 523560,
+        "bit_mismatches": 0,
+        "max_abs_diff": 0.0
+      }
+    },
+    "native": {
+      "run_dir": "/app/model/rocm-readme-20260920/runs/native-3step-r4",
+      "validation_passed": false,
+      "errors": [
+        "missing vllm/rollout ffn execution record",
+        "vllm/rollout ffn had zero calls"
+      ],
+      "strict_bitwise": {
+        "bitwise_equal": false,
+        "bitwise_mismatch_count": 32460,
+        "element_count": 136086,
+        "max_abs_diff": 5.143439292907715
+      },
+      "source_and_config_fingerprint": "1262e3c676d40e8995d520c9f17b21a88241d3c62778447761354c19300acee1",
+      "reuse_environment": "0",
+      "attention_backend": "triton",
+      "sparse_replay": "0",
+      "framework_readbacks_passed": false,
+      "frozen_sources_match": true,
+      "step_metrics": [
+        {
+          "step": 0,
+          "response_tokens": 37237,
+          "perf/step_time": 138.5405080318451,
+          "perf/rollout_time": 92.24859404563904,
+          "perf/train_time": 43.252480268478394,
+          "train/train_rollout_logprob_abs_diff": 0.024227986112236977
+        },
+        {
+          "step": 1,
+          "response_tokens": 43553,
+          "perf/step_time": 128.96525168418884,
+          "perf/rollout_time": 101.63942861557007,
+          "perf/train_time": 24.128414154052734,
+          "train/train_rollout_logprob_abs_diff": 0.03839162737131119
+        },
+        {
+          "step": 2,
+          "response_tokens": 55296,
+          "perf/step_time": 158.72699975967407,
+          "perf/rollout_time": 130.39790201187134,
+          "perf/train_time": 24.805688858032227,
+          "train/train_rollout_logprob_abs_diff": 0.03427157551050186
+        }
+      ],
+      "total_response_tokens": 136086,
+      "total_step_seconds": 426.232759475708,
+      "mean_step_seconds": 142.07758649190268,
+      "mean_rollout_seconds": 108.09530822436015,
+      "mean_train_seconds": 30.728861093521118,
+      "pooled_e2e_tokens_per_gpu_per_second": 39.9095321085227,
+      "pooled_e2e_tokens_per_gpu_per_ms": 0.039909532108522695,
+      "pooled_e2e_tokens_per_ms_8gpu": 0.31927625686818156,
+      "excluding_first_step_tokens_per_gpu_per_second": 42.94910599081963,
+      "inference_jit_warning_count": 6
+    }
+  },
+  "consistency_vs_native_e2e_percent": -3.3857706623145356,
+  "excluding_first_step_consistency_vs_native_e2e_percent": -5.466703088645419
+}
