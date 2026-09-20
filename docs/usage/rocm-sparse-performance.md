@@ -147,8 +147,8 @@ overrides. CLI regression tests: 32 passed, one Windows symlink test skipped.
 
 The final environment default applies before initialization to training as well
 as rollout. It is not identical to the diagnostic's live vLLM-only intervention;
-no additional end-to-end run was launched after this change. Its final step
-time remains unmeasured. The Quick start still defaults to independent training
+the one-step diagnostic did not measure this final environment default. The
+subsequent three-step pair is reported below. The Quick start defaults to independent training
 logprobs and Triton chunked Attention with sparse logp/monitoring-entropy scoring.
 
 Another measured cost remains: complete top-p support transport reads a GPU
@@ -157,9 +157,57 @@ replays, fixed-size transport with and without that synchronization took 4.2738
 and 3.8455 seconds (10.02% less). This is diagnostic evidence, not a production
 64-token cap or a percentage to add to the full-run affinity gain. Arbitrary
 top-p and complete support remain supported; this change does not remove that
-synchronization. Native FFN provenance and a final matched native/strict timing
-pair remain open, so the PR retains draft status.
+synchronization. Native FFN provenance and the historical performance target
+remain open, so the PR retains draft status.
 
 See the [one-step raw audit](../validation/rocm-readme-20260920/e2e-affinity-audit.json)
 and [launcher/initialization checks](../validation/rocm-readme-20260920/affinity-fix-verification.json),
 plus the [short decode replay measurements](../validation/rocm-readme-20260920/decode-sync-audit.json).
+
+## Final launcher three-step pair, revision b7fd0ba
+
+The exact no-reuse reproduction command above was subsequently run with
+`--steps 3`, first consistency and then native, in separate PID/network
+namespaces. Both used the launcher's default `AMD_CPU_AFFINITY=0`; sampled
+training and rollout actors retained all 160 allowed CPUs throughout. All 31
+files changed by the PR matched the published revision after LF normalization.
+The kernels and companion sources were unchanged during both arms.
+
+| Three-step measurement | Native | Strict |
+|---|---:|---:|
+| Response tokens | 134,504 | 132,044 |
+| Step 0 seconds | 63.7306 | 70.2361 |
+| Step 1 seconds | 51.8381 | 72.1041 |
+| Step 2 seconds | 60.2969 | 84.1282 |
+| Mean rollout seconds | 42.7283 | 57.3279 |
+| Mean training seconds | 14.3292 | 16.5488 |
+| Mean step seconds | 58.6219 | 75.4895 |
+| Pooled end-to-end tok/GPU/ms | 0.095601 | 0.072882 |
+
+Strict mean step time was **28.77% higher** and throughput **23.76% lower**.
+Excluding step 0, the respective differences were **+39.33%** and **-27.96%**.
+Rollout accounted for 14.600 of the 16.868-second mean step difference (86.55%).
+Both arms generated different trajectories, including different first-step
+tokens. Both last steps reached the same response-length cap for all eight
+samples; strict/native step times there were 84.1282/60.2969 seconds. These
+short runs do not establish steady-state or 200-step performance. The affinity
+fix improves absolute times but does **not** reproduce the historical 0.2069%
+step-time advantage; the measured relative gap remains substantial.
+
+Strict passed the full validator, backend readbacks and source sealing.
+All **132,044 distinct train/rollout logprobs** matched bitwise, maximum difference
+zero. An independent raw-bit audit checked **528,176 values** including TP
+replicas with zero mismatches. Reuse was disabled in both launch manifests;
+strict selected Triton Attention and sparse top-p scoring. Two strict and six
+native inference-time JIT warnings were logged, so excluding only step 0 does
+not guarantee all compilation is removed.
+
+Native completed all three training steps, but artifact validation still failed
+with `missing vllm/rollout ffn execution record` and `vllm/rollout ffn had zero
+calls`. The native timing remains provisional. No kernel speedup is inferred
+from this incomplete provenance, and the validator was not relaxed. The PR
+remains draft; both the native execution evidence and performance target are
+unresolved.
+
+See the [full final-pair audit](../validation/rocm-readme-20260920/final-affinity-pair-audit.json)
+for per-step metrics, source hashes, CPU-mask observations and validation errors.

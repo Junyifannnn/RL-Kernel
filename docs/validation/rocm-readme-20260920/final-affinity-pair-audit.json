@@ -1,0 +1,952 @@
+{
+  "scope": "PR #437 b7fd0ba, 8 MI300X, Qwen3-8B, training TP4 CP2 / rollout TP4 CP1; 3 steps per arm",
+  "order": [
+    "consistency",
+    "native"
+  ],
+  "rollout_logprob_reuse": false,
+  "warmup_policy": "Report all steps and separately exclude step 0; startup excluded by framework step timer, lazy compilation can remain.",
+  "parameters": {
+    "temperature": 0.7,
+    "top_p": 0.95,
+    "lr": 5e-07,
+    "kl_coef": 0.01,
+    "max_response_len": 6912,
+    "grpo_std_normalization": "disabled",
+    "samples_per_step": 8
+  },
+  "source_verification": {
+    "pr_commit": "b7fd0baff0567bfc8e543208ea4c589d18998324",
+    "all_match": true,
+    "files": [
+      {
+        "path": ".gitattributes",
+        "expected_sha256": "3260077a2fc2ae4388a035d1ffc75e54dde8b94207376ee5c552c11a266ef771",
+        "actual_sha256": "3260077a2fc2ae4388a035d1ffc75e54dde8b94207376ee5c552c11a266ef771"
+      },
+      {
+        "path": "README.md",
+        "expected_sha256": "4bc9faa8a3854f267c9f31e66e863188da6b191d343d6b2f08876299343262d4",
+        "actual_sha256": "4bc9faa8a3854f267c9f31e66e863188da6b191d343d6b2f08876299343262d4"
+      },
+      {
+        "path": "csrc/hip/hip_deterministic_logp_kernel.hip",
+        "expected_sha256": "d9c266601c23aa5ca978bd13b2be912b9fc59ce45fe6ed09f6f1f6790b6fe7d5",
+        "actual_sha256": "d9c266601c23aa5ca978bd13b2be912b9fc59ce45fe6ed09f6f1f6790b6fe7d5"
+      },
+      {
+        "path": "csrc/ops.cpp",
+        "expected_sha256": "03846f9f25250f32dff7811191b8cef890faf0ab90a9d6812e64069993029b47",
+        "actual_sha256": "03846f9f25250f32dff7811191b8cef890faf0ab90a9d6812e64069993029b47"
+      },
+      {
+        "path": "docs/usage/qwen3-vime-consistency.md",
+        "expected_sha256": "23344bfef3ca53418ce2495de660d5a627b45b7b27579bd57b37ad2418cec0f6",
+        "actual_sha256": "23344bfef3ca53418ce2495de660d5a627b45b7b27579bd57b37ad2418cec0f6"
+      },
+      {
+        "path": "docs/usage/rocm-sparse-performance.md",
+        "expected_sha256": "682746d49be7093be8664db45617496b2058c6e4a4623c863523d821c1ad7b8d",
+        "actual_sha256": "682746d49be7093be8664db45617496b2058c6e4a4623c863523d821c1ad7b8d"
+      },
+      {
+        "path": "docs/validation/rocm-readme-20260920/affinity-fix-verification.json",
+        "expected_sha256": "ef85cbff27d0290f38eaf6338ba8b3116ea133fa6d82ee576ac358026cb7a598",
+        "actual_sha256": "ef85cbff27d0290f38eaf6338ba8b3116ea133fa6d82ee576ac358026cb7a598"
+      },
+      {
+        "path": "docs/validation/rocm-readme-20260920/decode-sync-audit.json",
+        "expected_sha256": "24603cb9d0fe7a63c73334ace2fa80e91a90429bbc8c5cf34d08e0b2bbd42188",
+        "actual_sha256": "24603cb9d0fe7a63c73334ace2fa80e91a90429bbc8c5cf34d08e0b2bbd42188"
+      },
+      {
+        "path": "docs/validation/rocm-readme-20260920/e2e-affinity-audit.json",
+        "expected_sha256": "84e60316f58a9151aa71d2cfcc28d6e7fed38acc80386a37561efa2752962600",
+        "actual_sha256": "84e60316f58a9151aa71d2cfcc28d6e7fed38acc80386a37561efa2752962600"
+      },
+      {
+        "path": "docs/validation/rocm-readme-20260920/readme-pair-audit.json",
+        "expected_sha256": "68bfe1eead1a54230a72c4d4afdb8e042612f382af8a753ec1f9f44ec5ad1185",
+        "actual_sha256": "68bfe1eead1a54230a72c4d4afdb8e042612f382af8a753ec1f9f44ec5ad1185"
+      },
+      {
+        "path": "docs/validation/rocm-readme-20260920/tested-source-equivalence.json",
+        "expected_sha256": "8519fd5603ca25fe58e3137e848148d46141dba7754cdb5997d4a14894519aec",
+        "actual_sha256": "8519fd5603ca25fe58e3137e848148d46141dba7754cdb5997d4a14894519aec"
+      },
+      {
+        "path": "docs/validation/rocm-readme-20260920/tests.txt",
+        "expected_sha256": "40b14ed65e6754978b8bd78aa206022228ccfddde024375587b003d632596ef6",
+        "actual_sha256": "40b14ed65e6754978b8bd78aa206022228ccfddde024375587b003d632596ef6"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/companion_patches/README.md",
+        "expected_sha256": "cd86b5b979a743824abbbd35a652cf7e079141dbf2c1fe4da7c338dd7ef4fd57",
+        "actual_sha256": "cd86b5b979a743824abbbd35a652cf7e079141dbf2c1fe4da7c338dd7ef4fd57"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/companion_patches/sources.json",
+        "expected_sha256": "f8c3b1a09d1dc3e400e3fb8d0c9a35e1c7cd499a26967bb73fcd47323687b527",
+        "actual_sha256": "f8c3b1a09d1dc3e400e3fb8d0c9a35e1c7cd499a26967bb73fcd47323687b527"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/companion_patches/vime.patch",
+        "expected_sha256": "6548f0f8a95def762bee5f37ef3e383f1fe1e90753e3fcdad64bc7c72c5dfe45",
+        "actual_sha256": "6548f0f8a95def762bee5f37ef3e383f1fe1e90753e3fcdad64bc7c72c5dfe45"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/launch_arm.sh",
+        "expected_sha256": "37f9ce5292870297ebcb9c51dd1f01b69d2b262d27a17e1bce69ef25648ac881",
+        "actual_sha256": "37f9ce5292870297ebcb9c51dd1f01b69d2b262d27a17e1bce69ef25648ac881"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/profiles/mi300x-qwen3-8b.json",
+        "expected_sha256": "bab8899e792c3265fa8b1223d9313741387ec361f87f8656fd3ae0d407becec3",
+        "actual_sha256": "bab8899e792c3265fa8b1223d9313741387ec361f87f8656fd3ae0d407becec3"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/run.py",
+        "expected_sha256": "f685dc798504549a2bc0db6b5a3da4e5e91de5792f19fee921c13d0371a85b6a",
+        "actual_sha256": "f685dc798504549a2bc0db6b5a3da4e5e91de5792f19fee921c13d0371a85b6a"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/run_pr377_workload.py",
+        "expected_sha256": "14e67efdb60d20bf5081e9d08c1760027962b6b6e4b034fb5a54ea0c43efba9b",
+        "actual_sha256": "14e67efdb60d20bf5081e9d08c1760027962b6b6e4b034fb5a54ea0c43efba9b"
+      },
+      {
+        "path": "examples/vime_rocm_attention_ablation/validate_artifacts.py",
+        "expected_sha256": "4e0624103d07eb35531fcabfc00a694da428b38e7dc8905a3fa8ced58004a7a0",
+        "actual_sha256": "4e0624103d07eb35531fcabfc00a694da428b38e7dc8905a3fa8ced58004a7a0"
+      },
+      {
+        "path": "rl_engine/integrations/framework_operators.py",
+        "expected_sha256": "8877fe9a7d48d696b83b4a3e5d1a2bac9c9d6be2eede5bec5f40064a3e9c261a",
+        "actual_sha256": "8877fe9a7d48d696b83b4a3e5d1a2bac9c9d6be2eede5bec5f40064a3e9c261a"
+      },
+      {
+        "path": "rl_engine/integrations/linear_logp.py",
+        "expected_sha256": "b248c21e51a669a1f80079ca43c10b9f1f7b188bf2757bc1019595f334ccb70a",
+        "actual_sha256": "b248c21e51a669a1f80079ca43c10b9f1f7b188bf2757bc1019595f334ccb70a"
+      },
+      {
+        "path": "rl_engine/integrations/vime/linear_logp_provider.py",
+        "expected_sha256": "f8f0a7744849c88f5eb214a7982dbdb73191513cfae3f3b5d7c6931d5ddaaa70",
+        "actual_sha256": "f8f0a7744849c88f5eb214a7982dbdb73191513cfae3f3b5d7c6931d5ddaaa70"
+      },
+      {
+        "path": "rl_engine/integrations/vllm_runtime.py",
+        "expected_sha256": "7b1f56ef87ebf0ef63c201ddcc718f4d3c0c8a3b4dcac7ef6234707aaaea6f17",
+        "actual_sha256": "7b1f56ef87ebf0ef63c201ddcc718f4d3c0c8a3b4dcac7ef6234707aaaea6f17"
+      },
+      {
+        "path": "rl_engine/repro.py",
+        "expected_sha256": "a47d5159d64ebfa76cde0eb05f8e0f443765d3ad4ecaa664e1a0117d6bd0816c",
+        "actual_sha256": "a47d5159d64ebfa76cde0eb05f8e0f443765d3ad4ecaa664e1a0117d6bd0816c"
+      },
+      {
+        "path": "tests/test_rocm_bitwise_validation.py",
+        "expected_sha256": "8a4f97dd4e463816f8f36f4685430a255201b86c13df4105e6f23aef6e4417fb",
+        "actual_sha256": "8a4f97dd4e463816f8f36f4685430a255201b86c13df4105e6f23aef6e4417fb"
+      },
+      {
+        "path": "tests/test_rocm_repro_profile.py",
+        "expected_sha256": "e9ab262733b18326e088fc531c7234176fcc10cef64dacdda01b711d4cb6d94b",
+        "actual_sha256": "e9ab262733b18326e088fc531c7234176fcc10cef64dacdda01b711d4cb6d94b"
+      },
+      {
+        "path": "tests/test_rocm_sparse_companion_contract.py",
+        "expected_sha256": "0437dca7a36aee7b630ceb67b7e5ee75423cd009879a3d90a21d0bdcc7a96a1c",
+        "actual_sha256": "0437dca7a36aee7b630ceb67b7e5ee75423cd009879a3d90a21d0bdcc7a96a1c"
+      },
+      {
+        "path": "tests/test_rocm_sparse_nucleus.py",
+        "expected_sha256": "5f53c2abfcae6a091cd3a585ac1ec650a2ccce33595e0307722a1fa3b9a0e3cb",
+        "actual_sha256": "5f53c2abfcae6a091cd3a585ac1ec650a2ccce33595e0307722a1fa3b9a0e3cb"
+      },
+      {
+        "path": "tests/test_vime_linear_logp_provider.py",
+        "expected_sha256": "8230e10a22f4e365c6594b16cfb075c9f76bb8937863901e0f0aebfc7e6a7e41",
+        "actual_sha256": "8230e10a22f4e365c6594b16cfb075c9f76bb8937863901e0f0aebfc7e6a7e41"
+      },
+      {
+        "path": "tests/test_vllm_worker_top_p_replay.py",
+        "expected_sha256": "879646eaa3554c20e5f0459d61caba6bdd5b1d9b4e292d97d02f4f5478f21c45",
+        "actual_sha256": "879646eaa3554c20e5f0459d61caba6bdd5b1d9b4e292d97d02f4f5478f21c45"
+      }
+    ]
+  },
+  "status": {
+    "consistency": {
+      "state": "finished",
+      "started_utc": "2026-09-20T09:17:06.526729+00:00",
+      "returncode": 0,
+      "finished_utc": "2026-09-20T09:25:03.494121+00:00"
+    },
+    "native": {
+      "state": "finished",
+      "started_utc": "2026-09-20T09:25:03.494600+00:00",
+      "returncode": 2,
+      "finished_utc": "2026-09-20T09:32:18.715412+00:00"
+    }
+  },
+  "runs": {
+    "consistency": {
+      "run_dir": "/app/model/rocm-readme-20260920/runs/final-affinity-consistency-3step",
+      "validation_passed": true,
+      "errors": [],
+      "validation_metrics": {
+        "bitwise_equal": true,
+        "bitwise_mismatch_count": 0,
+        "element_count": 132044,
+        "errors": [],
+        "max_abs_diff": 0.0,
+        "mismatch_count": 0,
+        "mismatch_k3_kl": 0.0,
+        "mismatch_kl": 0.0,
+        "passed": true,
+        "require_exact": true,
+        "sample_count": 24,
+        "torch_equal": true,
+        "train_rollout_logprob_abs_diff": 0.0
+      },
+      "frozen_sources_match": true,
+      "runtime_readbacks": {
+        "errors": [],
+        "frameworks": {
+          "megatron/training": {
+            "backend_ids": [
+              "rlkernel.attention.deterministic.v1"
+            ],
+            "call_count": 26496,
+            "expected_implementation": "rl_kernel",
+            "installed_processes": 8,
+            "readback_count": 8
+          },
+          "megatron/training/ffn": {
+            "backend_ids": [
+              "rlkernel.ffn.qwen3.deterministic.v1"
+            ],
+            "call_count": 26496,
+            "expected_implementation": "rl_kernel",
+            "installed_processes": 8,
+            "readback_count": 8
+          },
+          "megatron/training/logp": {
+            "backend_ids": [
+              "rlkernel.linear_logp.bitwise.v1"
+            ],
+            "call_count": 552,
+            "expected_implementation": "rl_kernel",
+            "installed_processes": 8,
+            "readback_count": 8
+          },
+          "vllm/rollout": {
+            "backend_ids": [
+              "rlkernel.attention.deterministic.v1"
+            ],
+            "call_count": 8640,
+            "expected_implementation": "rl_kernel",
+            "installed_processes": 13,
+            "readback_count": 13
+          },
+          "vllm/rollout/ffn": {
+            "backend_ids": [
+              "rlkernel.ffn.qwen3.deterministic.v1"
+            ],
+            "call_count": 8,
+            "expected_implementation": "rl_kernel",
+            "installed_processes": 13,
+            "readback_count": 8
+          },
+          "vllm/rollout/logp": {
+            "backend_ids": [
+              "rlkernel.linear_logp.bitwise.v1"
+            ],
+            "call_count": 8,
+            "expected_implementation": "rl_kernel",
+            "installed_processes": 13,
+            "readback_count": 8
+          }
+        },
+        "passed": true
+      },
+      "reuse_environment": "0",
+      "affinity_environment": "0",
+      "attention_backend": "triton",
+      "sparse_replay": "1",
+      "step_metrics": [
+        {
+          "step": 0,
+          "response_tokens": 35878,
+          "token_multiset_sha256": "3e97cb844c7aee8ba5fdb17e74377381ef4959a0e983cb7006a077fcdb26a862",
+          "sample_response_lengths_in_order": [
+            5389,
+            4995,
+            3273,
+            4885,
+            3645,
+            4649,
+            4034,
+            5008
+          ],
+          "rollout/response_len/max": 5389,
+          "perf/rollout_time": 50.74067234992981,
+          "perf/tokens_per_gpu_per_sec": 88.38570307210767,
+          "perf/longest_sample_tokens_per_sec": 106.2067124935812,
+          "perf/effective_tokens_per_gpu_per_sec": 88.38570307210767,
+          "perf/longest_effective_sample_tokens_per_sec": 106.2067124935812,
+          "train/train_rollout_logprob_abs_diff": 0.0,
+          "perf/update_weights_time": 0.5832147598266602,
+          "perf/data_preprocess_time": 0.004119396209716797,
+          "perf/train_wait_time": 52.03901147842407,
+          "perf/ref_log_probs_time": 5.342185020446777,
+          "perf/log_probs_time": 2.195030927658081,
+          "perf/actor_train_time": 10.263063907623291,
+          "perf/train_time": 18.197038888931274,
+          "perf/log_probs_tflops": 34.72431789248707,
+          "perf/ref_log_probs_tflops": 14.267748388367405,
+          "perf/actor_train_tflops": 22.280174537125482,
+          "perf/actor_train_tok_per_s": 3594.832920468861,
+          "perf/step_time": 70.23605036735535,
+          "perf/wait_time_ratio": 0.7409159713031218
+        },
+        {
+          "step": 1,
+          "response_tokens": 40870,
+          "token_multiset_sha256": "69ad6b4e605a7fa3870c296a5c31c693bfae1e94e570700c738803707810be67",
+          "sample_response_lengths_in_order": [
+            4287,
+            4825,
+            5226,
+            6011,
+            4705,
+            5254,
+            4845,
+            5717
+          ],
+          "rollout/response_len/max": 6011,
+          "perf/rollout_time": 55.45258283615112,
+          "perf/tokens_per_gpu_per_sec": 92.12826055542105,
+          "perf/longest_sample_tokens_per_sec": 108.3989183652823,
+          "perf/effective_tokens_per_gpu_per_sec": 92.12826055542105,
+          "perf/longest_effective_sample_tokens_per_sec": 108.3989183652823,
+          "train/train_rollout_logprob_abs_diff": 0.0,
+          "perf/update_weights_time": 0.5277941226959229,
+          "perf/data_preprocess_time": 0.0054285526275634766,
+          "perf/train_wait_time": 57.12425923347473,
+          "perf/ref_log_probs_time": 3.718766212463379,
+          "perf/log_probs_time": 2.343862295150757,
+          "perf/actor_train_time": 8.55202054977417,
+          "perf/train_time": 14.979878664016724,
+          "perf/log_probs_tflops": 37.53649808092208,
+          "perf/ref_log_probs_tflops": 23.65848712107992,
+          "perf/actor_train_tflops": 30.863016066838824,
+          "perf/actor_train_tok_per_s": 4926.788909682007,
+          "perf/step_time": 72.10413789749146,
+          "perf/wait_time_ratio": 0.7922466157862782
+        },
+        {
+          "step": 2,
+          "response_tokens": 55296,
+          "token_multiset_sha256": "b4d5b8e88230d91d73066760ae3391358ed24ffd1a08ec1566aff44c3700deb8",
+          "sample_response_lengths_in_order": [
+            6912,
+            6912,
+            6912,
+            6912,
+            6912,
+            6912,
+            6912,
+            6912
+          ],
+          "rollout/response_len/max": 6912,
+          "perf/rollout_time": 65.7904200553894,
+          "perf/tokens_per_gpu_per_sec": 105.06088871572396,
+          "perf/longest_sample_tokens_per_sec": 105.06088871572396,
+          "perf/effective_tokens_per_gpu_per_sec": 105.06088871572396,
+          "perf/longest_effective_sample_tokens_per_sec": 105.06088871572396,
+          "train/train_rollout_logprob_abs_diff": 0.0,
+          "perf/update_weights_time": 0.536679744720459,
+          "perf/data_preprocess_time": 0.005547046661376953,
+          "perf/train_wait_time": 67.65869045257568,
+          "perf/ref_log_probs_time": 3.7926642894744873,
+          "perf/log_probs_time": 2.5124173164367676,
+          "perf/actor_train_time": 9.806544065475464,
+          "perf/train_time": 16.46948266029358,
+          "perf/log_probs_tflops": 48.88390851173751,
+          "perf/ref_log_probs_tflops": 32.3827180224848,
+          "perf/actor_train_tflops": 37.571883862445674,
+          "perf/actor_train_tok_per_s": 5812.44520183945,
+          "perf/step_time": 84.12817311286926,
+          "perf/wait_time_ratio": 0.8042334446250539
+        }
+      ],
+      "inference_jit_warning_count": 2,
+      "all_steps": {
+        "response_tokens": 132044,
+        "total_step_seconds": 226.46836137771606,
+        "mean_step_seconds": 75.48945379257202,
+        "mean_rollout_seconds": 57.32789174715678,
+        "mean_train_seconds": 16.548800071080525,
+        "e2e_tokens_per_gpu_per_second": 72.88214521264294,
+        "e2e_tokens_per_gpu_per_ms": 0.07288214521264294
+      },
+      "excluding_first_step": {
+        "response_tokens": 96166,
+        "total_step_seconds": 156.23231101036072,
+        "mean_step_seconds": 78.11615550518036,
+        "mean_rollout_seconds": 60.621501445770264,
+        "mean_train_seconds": 15.724680662155151,
+        "e2e_tokens_per_gpu_per_second": 76.94151051252663,
+        "e2e_tokens_per_gpu_per_ms": 0.07694151051252664
+      },
+      "independent_raw_audit": {
+        "count_including_tp_duplicates": 528176,
+        "distinct_count": 132044,
+        "bit_mismatches": 0,
+        "max_abs_diff": 0.0
+      },
+      "actor_affinity": {
+        "1472780": {
+          "comm": "ray::RolloutMan",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1473033": {
+          "comm": "ray::RolloutMan",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1473336": {
+          "comm": "ray::VLLMEngine",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1473337": {
+          "comm": "ray::VLLMEngine",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474043": {
+          "comm": "VLLM::EngineCor",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474035": {
+          "comm": "VLLM::EngineCor",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474273": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474274": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474275": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474276": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474279": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474280": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474281": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1474282": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1475789": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476254": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476255": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476256": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476257": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476258": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476259": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1476260": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        }
+      }
+    },
+    "native": {
+      "run_dir": "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step",
+      "validation_passed": false,
+      "errors": [
+        "missing vllm/rollout ffn execution record",
+        "vllm/rollout ffn had zero calls"
+      ],
+      "validation_metrics": {
+        "bitwise_equal": false,
+        "bitwise_mismatch_count": 31955,
+        "element_count": 134504,
+        "errors": [],
+        "max_abs_diff": 4.45691180229187,
+        "mismatch_count": 31955,
+        "mismatch_k3_kl": 0.005721387702969603,
+        "mismatch_kl": 0.005967812729484413,
+        "passed": true,
+        "require_exact": false,
+        "sample_count": 24,
+        "torch_equal": false,
+        "train_rollout_logprob_abs_diff": 0.031958369639050854
+      },
+      "frozen_sources_match": true,
+      "runtime_readbacks": {
+        "errors": [
+          "missing vllm/rollout ffn execution record",
+          "vllm/rollout ffn had zero calls"
+        ],
+        "frameworks": {
+          "megatron/training": {
+            "modules": {
+              "attention": {
+                "backend_ids": [
+                  "megatron.production.attention"
+                ],
+                "call_count": 26496,
+                "case_id": "P/P",
+                "expected_implementation": "production",
+                "implementations": [
+                  "production"
+                ],
+                "installed_processes": 8
+              },
+              "ffn": {
+                "backend_ids": [
+                  "megatron.production.ffn"
+                ],
+                "call_count": 26496,
+                "case_id": "P/P",
+                "expected_implementation": "production",
+                "implementations": [
+                  "production"
+                ],
+                "installed_processes": 8
+              },
+              "logp": {
+                "backend_ids": [],
+                "call_count": 0,
+                "case_id": "P/P",
+                "expected_implementation": "production",
+                "implementations": [],
+                "installed_processes": 0,
+                "native_marker_present": true
+              }
+            },
+            "readback_count": 8
+          },
+          "vllm/rollout": {
+            "modules": {
+              "attention": {
+                "backend_ids": [
+                  "vllm.production.attention"
+                ],
+                "call_count": 8640,
+                "case_id": "P/P",
+                "expected_implementation": "production",
+                "implementations": [
+                  "production"
+                ],
+                "installed_processes": 13
+              },
+              "ffn": {
+                "backend_ids": [],
+                "call_count": 0,
+                "case_id": "P/P",
+                "expected_implementation": "production",
+                "implementations": [],
+                "installed_processes": 13
+              },
+              "logp": {
+                "backend_ids": [
+                  "vllm.production.logp"
+                ],
+                "call_count": 8,
+                "case_id": "P/P",
+                "expected_implementation": "production",
+                "implementations": [
+                  "production"
+                ],
+                "installed_processes": 13
+              }
+            },
+            "readback_count": 13
+          }
+        },
+        "passed": false,
+        "paths": [
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-14687.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15128.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15130.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15131.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15132.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15133.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15134.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/megatron-training-15135.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-10259.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-12511.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-12513.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-12898.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-12904.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13132.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13135.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13136.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13137.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13138.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13139.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13140.json",
+          "/app/model/rocm-readme-20260920/runs/final-affinity-native-3step/arms/p-p/readbacks/vllm-rollout-13141.json"
+        ]
+      },
+      "reuse_environment": "0",
+      "affinity_environment": "0",
+      "attention_backend": "triton",
+      "sparse_replay": "0",
+      "step_metrics": [
+        {
+          "step": 0,
+          "response_tokens": 38691,
+          "token_multiset_sha256": "75cc4122835aae0c68d732d14386ccae2180de599fe0aada233de3cc8bd39db0",
+          "sample_response_lengths_in_order": [
+            6312,
+            5048,
+            5418,
+            4143,
+            3596,
+            3763,
+            5813,
+            4598
+          ],
+          "rollout/response_len/max": 6312,
+          "perf/rollout_time": 41.948386907577515,
+          "perf/tokens_per_gpu_per_sec": 115.29346791464732,
+          "perf/longest_sample_tokens_per_sec": 150.4706251019108,
+          "perf/effective_tokens_per_gpu_per_sec": 115.29346791464732,
+          "perf/longest_effective_sample_tokens_per_sec": 150.4706251019108,
+          "train/train_rollout_logprob_abs_diff": 0.0232553593814373,
+          "perf/update_weights_time": 1.040858507156372,
+          "perf/data_preprocess_time": 0.004514932632446289,
+          "perf/train_wait_time": 43.423503160476685,
+          "perf/ref_log_probs_time": 5.681812286376953,
+          "perf/log_probs_time": 2.416276454925537,
+          "perf/actor_train_time": 11.680945634841919,
+          "perf/train_time": 20.307103872299194,
+          "perf/log_probs_tflops": 34.201530441013524,
+          "perf/ref_log_probs_tflops": 14.544717171523487,
+          "perf/actor_train_tflops": 21.22439962751142,
+          "perf/actor_train_tok_per_s": 3399.296704332052,
+          "perf/step_time": 63.73060703277588,
+          "perf/wait_time_ratio": 0.6813602628662316
+        },
+        {
+          "step": 1,
+          "response_tokens": 40517,
+          "token_multiset_sha256": "2ad305f4448e4b36447625e3c14adbab8864f0d61d124c9ab24b0785548ebc63",
+          "sample_response_lengths_in_order": [
+            5128,
+            6107,
+            5152,
+            5017,
+            4072,
+            4905,
+            5492,
+            4644
+          ],
+          "rollout/response_len/max": 6107,
+          "perf/rollout_time": 39.40238642692566,
+          "perf/tokens_per_gpu_per_sec": 128.53599640196117,
+          "perf/longest_sample_tokens_per_sec": 154.99061234084988,
+          "perf/effective_tokens_per_gpu_per_sec": 128.53599640196117,
+          "perf/longest_effective_sample_tokens_per_sec": 154.99061234084988,
+          "train/train_rollout_logprob_abs_diff": 0.03594433143734932,
+          "perf/update_weights_time": 0.5256872177124023,
+          "perf/data_preprocess_time": 0.0058803558349609375,
+          "perf/train_wait_time": 41.01773142814636,
+          "perf/ref_log_probs_time": 2.385274887084961,
+          "perf/log_probs_time": 2.32269287109375,
+          "perf/actor_train_time": 5.683497428894043,
+          "perf/train_time": 10.820354461669922,
+          "perf/log_probs_tflops": 37.53648099005034,
+          "perf/ref_log_probs_tflops": 36.55164328170388,
+          "perf/actor_train_tflops": 46.02045724079876,
+          "perf/actor_train_tok_per_s": 7351.283346692778,
+          "perf/step_time": 51.838085889816284,
+          "perf/wait_time_ratio": 0.7912663194264353
+        },
+        {
+          "step": 2,
+          "response_tokens": 55296,
+          "token_multiset_sha256": "0799dde694e5948c74631b5a2331b05e45289becd1b3cd488892a3cb388fc651",
+          "sample_response_lengths_in_order": [
+            6912,
+            6912,
+            6912,
+            6912,
+            6912,
+            6912,
+            6912,
+            6912
+          ],
+          "rollout/response_len/max": 6912,
+          "perf/rollout_time": 46.83423089981079,
+          "perf/tokens_per_gpu_per_sec": 147.58436014005142,
+          "perf/longest_sample_tokens_per_sec": 147.58436014005142,
+          "perf/effective_tokens_per_gpu_per_sec": 147.58436014005142,
+          "perf/longest_effective_sample_tokens_per_sec": 147.58436014005142,
+          "train/train_rollout_logprob_abs_diff": 0.03483691066503525,
+          "perf/update_weights_time": 0.5416486263275146,
+          "perf/data_preprocess_time": 0.004878044128417969,
+          "perf/train_wait_time": 48.43665170669556,
+          "perf/ref_log_probs_time": 2.6819217205047607,
+          "perf/log_probs_time": 2.6402361392974854,
+          "perf/actor_train_time": 6.095886945724487,
+          "perf/train_time": 11.860210180282593,
+          "perf/log_probs_tflops": 46.51734608582364,
+          "perf/ref_log_probs_tflops": 45.794318790514446,
+          "perf/actor_train_tflops": 60.44244881844839,
+          "perf/actor_train_tok_per_s": 9350.567113121819,
+          "perf/step_time": 60.29686188697815,
+          "perf/wait_time_ratio": 0.8033030275686047
+        }
+      ],
+      "inference_jit_warning_count": 6,
+      "all_steps": {
+        "response_tokens": 134504,
+        "total_step_seconds": 175.8655548095703,
+        "mean_step_seconds": 58.6218516031901,
+        "mean_rollout_seconds": 42.728334744771324,
+        "mean_train_seconds": 14.329222838083902,
+        "e2e_tokens_per_gpu_per_second": 95.60143837265548,
+        "e2e_tokens_per_gpu_per_ms": 0.09560143837265547
+      },
+      "excluding_first_step": {
+        "response_tokens": 95813,
+        "total_step_seconds": 112.13494777679443,
+        "mean_step_seconds": 56.06747388839722,
+        "mean_rollout_seconds": 43.118308663368225,
+        "mean_train_seconds": 11.340282320976257,
+        "e2e_tokens_per_gpu_per_second": 106.80546285926467,
+        "e2e_tokens_per_gpu_per_ms": 0.10680546285926466
+      },
+      "actor_affinity": {
+        "1495671": {
+          "comm": "ray::RolloutMan",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1495951": {
+          "comm": "ray::RolloutMan",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1496236": {
+          "comm": "ray::VLLMEngine",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1496237": {
+          "comm": "ray::VLLMEngine",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1496935": {
+          "comm": "VLLM::EngineCor",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1496941": {
+          "comm": "VLLM::EngineCor",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497170": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497173": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497174": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497175": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497176": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497177": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497178": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1497179": {
+          "comm": "VLLM::Worker_TP",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1498729": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499171": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499173": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499174": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499175": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499176": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499177": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        },
+        "1499178": {
+          "comm": "ray::MegatronTr",
+          "observed_cpu_counts": [
+            160
+          ]
+        }
+      }
+    }
+  },
+  "comparison": {
+    "all_steps": {
+      "strict_vs_native_step_time_percent": 28.77357457686309,
+      "strict_vs_native_e2e_throughput_percent": -23.764593448324987
+    },
+    "excluding_first_step": {
+      "strict_vs_native_step_time_percent": 39.32526309401996,
+      "strict_vs_native_e2e_throughput_percent": -27.961071978208775
+    }
+  },
+  "same_first_step_token_multiset": false
+}
