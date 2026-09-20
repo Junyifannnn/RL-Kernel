@@ -1091,6 +1091,7 @@ def _patch_qwen3_strict_model(
         register_rocm_linear_staging = register_det_gemm_all_reduce_staging
 
     attention_init = attention_cls.__init__
+    attention_forward = getattr(attention_cls, "forward", None)
     unquantized_apply = linear_method_cls.apply
     original_rms_forward_native = rms_norm_cls.forward_native
 
@@ -1434,6 +1435,38 @@ def _patch_qwen3_strict_model(
     if hasattr(attention_cls, _STRICT_MODEL_PATCH_MARKER):
         return
 
+    def strict_attention_forward(instance, positions, hidden_states):
+        from rl_engine.kernels.ops.rocm.qk_norm_rope import strict_qk_norm_rope
+
+        rotary = instance.rotary_emb
+        cosine = getattr(rotary, "_rl_kernel_rope_cos_fp32", None)
+        sine = getattr(rotary, "_rl_kernel_rope_sin_fp32", None)
+        if (
+            instance.head_dim != 128
+            or cosine is None
+            or sine is None
+            or instance.q_norm.variance_size_override is not None
+            or instance.k_norm.variance_size_override is not None
+            or not instance.q_norm.has_weight
+            or not instance.k_norm.has_weight
+        ):
+            return attention_forward(instance, positions, hidden_states)
+        qkv, _ = instance.qkv_proj(hidden_states)
+        q, k, v = qkv.split([instance.q_size, instance.kv_size, instance.kv_size], dim=-1)
+        query, key = strict_qk_norm_rope(
+            q.view(-1, instance.num_heads, instance.head_dim),
+            k.view(-1, instance.num_kv_heads, instance.head_dim),
+            instance.q_norm.weight,
+            instance.k_norm.weight,
+            positions,
+            cosine,
+            sine,
+            instance.q_norm.variance_epsilon,
+            instance.k_norm.variance_epsilon,
+        )
+        output, _ = instance.o_proj(instance.attn(query.reshape(q.shape), key.reshape(k.shape), v))
+        return output
+
     def attention_init_wrapped(instance: Any, *args: Any, **kwargs: Any) -> None:
         require_rocm_graph_runtime()
         attention_init(instance, *args, **kwargs)
@@ -1447,6 +1480,8 @@ def _patch_qwen3_strict_model(
     setattr(attention_cls, _STRICT_MODEL_PATCH_MARKER, attention_init)
     linear_method_cls.apply = deterministic_linear_apply
     attention_cls.__init__ = attention_init_wrapped
+    if torch.version.hip is not None and production_classes:
+        attention_cls.forward = strict_attention_forward
 
 
 def _patch_sampler(integration: VllmIntegration, *, strict_linear_logp: bool) -> None:

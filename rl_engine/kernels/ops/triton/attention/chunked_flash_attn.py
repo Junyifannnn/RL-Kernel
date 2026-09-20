@@ -633,6 +633,12 @@ def paged_attention_forward(
         return out, lse
     if max_seqlen_q * group > BLOCK_M:
         raise ValueError("split schedule requires max_seqlen_q * gqa_group <= BLOCK_M")
+    # Decode packs only a few query/head rows. A smaller tile avoids masked
+    # MFMA work without changing the per-row key traversal or reduction tree.
+    split_options = _COMPILE_OPTIONS
+    if max_seqlen_q * group <= 16:
+        common["BLOCK_M"] = 16
+        split_options = {**_COMPILE_OPTIONS, "num_warps": 2}
     num_chunks = triton.cdiv(int(block_table.size(1)) * PAGE_SIZE, CHUNK_KV)
     pm = torch.empty((num_chunks, total_q, num_q_heads), dtype=torch.float32, device=q.device)
     pl = torch.empty_like(pm)
@@ -668,7 +674,7 @@ def paged_attention_forward(
         scale_log2,
         group,
         **common,
-        **_COMPILE_OPTIONS,
+        **split_options,
     )
     if seq_of_token is None:
         if total_q == batch:
