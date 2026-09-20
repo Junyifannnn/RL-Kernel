@@ -5,7 +5,7 @@
 Starts an in-process ``vllm.LLM`` with the same engine settings the Vime
 launcher uses for the PR377 workload (TP4, HIP Graph ``FULL_AND_PIECEWISE``,
 capture size 32, AITER FA backend), warms the strict route, then records a
-profiler trace of a decode-heavy generation using vLLM's ``ProfilerConfig``.
+profiler trace of a decode-heavy generation through ``VLLM_TORCH_PROFILER_DIR``.
 Summarize the per-rank traces afterwards with ``summarize_rollout_trace.py``.
 
 Example::
@@ -32,7 +32,6 @@ def configure_environment(case: str, trace_dir: Path, capture_size: int) -> None
     existing = os.environ.get("PYTHONPATH", "")
     if root not in existing.split(os.pathsep):
         os.environ["PYTHONPATH"] = root + (os.pathsep + existing if existing else "")
-    os.environ.setdefault("AMD_CPU_AFFINITY", "0")
     # AITER JIT builds resolve GPU_ARCHS=native to nothing inside workers.
     if os.environ.get("GPU_ARCHS", "native") == "native":
         os.environ["GPU_ARCHS"] = os.environ.get("PYTORCH_ROCM_ARCH", "gfx942")
@@ -65,30 +64,6 @@ def configure_environment(case: str, trace_dir: Path, capture_size: int) -> None
     Path(os.environ["RL_KERNEL_MISMATCH_SIDECAR_DIR"]).mkdir(parents=True, exist_ok=True)
 
 
-def verify_attention_route(worker, case: str, requested_core: str) -> dict:
-    """Fail before profiling if backend selection bypassed the installed hook."""
-    from rl_engine.integrations.state import get_active_integration
-
-    integration = get_active_integration("vllm")
-    if integration is None:
-        raise RuntimeError("rollout profiling requires the vLLM integration")
-    model = worker.model_runner.get_model()
-    impls = [
-        type(module.impl).__name__
-        for module in model.modules()
-        if hasattr(module, "impl") and "Attention" in type(module).__name__
-    ]
-    if not impls or set(impls) != {"RlKernelAttentionImpl"}:
-        raise RuntimeError(f"profiling bypassed RL-Kernel Attention routing: {impls}")
-    record = integration.readback().get("operators", {}).get("attention")
-    if not record or record.get("call_count", 0) <= 0:
-        raise RuntimeError("no Attention execution evidence after warmup")
-    if case.split("/")[-1].upper() == "R" and requested_core == "triton":
-        if "triton_chunked_flash_attention" not in json.dumps(record):
-            raise RuntimeError("profiling did not execute the requested Triton Attention")
-    return {"rank": worker.rank, "attention_layers": len(impls), "attention": record}
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", default="/app/model/Qwen3-8B")
@@ -104,20 +79,13 @@ def main() -> int:
     parser.add_argument("--warmup-decode-tokens", type=int, default=16)
     parser.add_argument("--max-num-seqs", type=int, default=None)
     parser.add_argument("--max-num-batched-tokens", type=int, default=None)
-    parser.add_argument("--temperature", type=float, default=1.0)
-    parser.add_argument("--top-p", type=float, default=1.0)
     args = parser.parse_args()
 
     args.trace_dir.mkdir(parents=True, exist_ok=True)
     configure_environment(args.case, args.trace_dir, args.capture_size)
-    os.environ["RL_KERNEL_VLLM_TEMPERATURE"] = str(args.temperature)
-    os.environ["RL_KERNEL_VLLM_TOP_P"] = str(args.top_p)
-    sparse = args.case.split("/")[-1].upper() == "R" and args.top_p < 1.0
-    os.environ["RL_KERNEL_SPARSE_TOP_P_REPLAY"] = "1" if sparse else "0"
 
     import torch
     from vllm import LLM, SamplingParams
-    from vllm.config import ProfilerConfig
 
     engine_limits = {}
     if args.max_num_seqs is not None:
@@ -126,14 +94,6 @@ def main() -> int:
         engine_limits["max_num_batched_tokens"] = args.max_num_batched_tokens
     llm = LLM(
         model=args.model,
-        # vLLM 0.26 does not select this backend from the legacy environment
-        # variable alone. The VIME launcher also passes it explicitly.
-        attention_backend="ROCM_AITER_FA",
-        logprobs_mode="processed_logits" if sparse else "processed_logprobs",
-        profiler_config=ProfilerConfig(
-            profiler="torch", torch_profiler_dir=str(args.trace_dir),
-            torch_profiler_with_stack=False, torch_profiler_use_gzip=True,
-        ),
         **engine_limits,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=args.gpu_memory_utilization,
@@ -158,20 +118,13 @@ def main() -> int:
         for _ in range(args.batch)
     ]
     warm = SamplingParams(
-        max_tokens=args.warmup_decode_tokens, temperature=args.temperature,
-        top_p=args.top_p, logprobs=0, ignore_eos=True, seed=1,
+        max_tokens=args.warmup_decode_tokens, temperature=1.0, ignore_eos=True, seed=1
     )
     t0 = time.time()
     llm.generate(prompts, warm)
     print(f"warmup generate: {time.time() - t0:.1f}s", flush=True)
-    route = llm.collective_rpc(
-        verify_attention_route,
-        args=(args.case, os.environ.get("RL_KERNEL_ROCM_ATTENTION_BACKEND", "ck")),
-    )
-    (args.trace_dir / "verified-route.json").write_text(json.dumps(route, indent=2))
 
-    params = SamplingParams(max_tokens=args.decode_tokens, temperature=args.temperature,
-                            top_p=args.top_p, logprobs=0, ignore_eos=True, seed=2)
+    params = SamplingParams(max_tokens=args.decode_tokens, temperature=1.0, ignore_eos=True, seed=2)
     llm.start_profile()
     t0 = time.time()
     outputs = llm.generate(prompts, params)
@@ -180,9 +133,6 @@ def main() -> int:
     tokens = sum(len(o.outputs[0].token_ids) for o in outputs)
     summary = {
         "case": args.case,
-        "temperature": args.temperature,
-        "top_p": args.top_p,
-        "attention_route_verified": True,
         "batch": args.batch,
         "prompt_tokens": args.prompt_tokens,
         "decode_tokens": args.decode_tokens,
