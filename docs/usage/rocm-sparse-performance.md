@@ -258,3 +258,23 @@ Historical G11/G10 first-three-step means were 98.3222/90.6144 seconds (+8.506%)
 even though the 200-step means differed by -0.2069%; that percentage is not
 a constant per-step advantage. The historical performance target remains open.
 See the [source comparison, numerical checks and raw replay measurements](../validation/rocm-readme-20260920/historical-alignment-audit.json).
+
+### Follow-up limited to historical execution-path alignment
+
+The ROCm sampler again skips CUDA-only greedy-temperature preprocessing.
+ROCm still passes the command's positive scalar temperature into the shared
+HIP scorer; CUDA retains its existing greedy handling. The earlier restoration
+of the 128-column HIP specialization remains. This follow-up introduces no
+sparse-score graph cache, speculative gather, or deferred overflow mechanism.
+
+Training and rollout topology remain independent command arguments, sampling
+parameters remain configurable, and rollout-logprob reuse remains disabled by
+default. Complete support, raw-logit preservation, and canonical TP/CP arithmetic
+corrections remain: restoring the historical capacity-64 overflow failure or
+removing correctness fixes would violate those requirements.
+
+Validation: 43 targeted ROCm tests passed; 44 local sampler/CLI tests passed
+with one Windows symlink skip. All three companion patches still reconstruct
+their recorded source trees. This is source and correctness validation, not
+evidence that the historical 0.2% step-time result has been reproduced. See the
+[scoped audit](../validation/rocm-readme-20260920/historical-only-alignment-audit.json).

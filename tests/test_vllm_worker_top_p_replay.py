@@ -12,12 +12,13 @@ import rl_engine.integrations.framework_operators as operators
 
 @pytest.mark.parametrize("top_p", [0.95, 1.0])
 @pytest.mark.parametrize("worker", [True, False])
+@pytest.mark.parametrize("temperature", [0.3, 0.7, 1.6])
 def test_sampler_replays_active_request_support_and_preserves_raw_logits(
-    monkeypatch, top_p, worker
+    monkeypatch, top_p, worker, temperature
 ):
     monkeypatch.setattr(operators, "_require_nvidia_cuda", lambda *_: None)
     monkeypatch.setattr(torch.version, "hip", "test")
-    monkeypatch.setenv("RL_KERNEL_VLLM_TEMPERATURE", "0.7")
+    monkeypatch.setenv("RL_KERNEL_VLLM_TEMPERATURE", str(temperature))
     context = SimpleNamespace(
         hidden=torch.zeros(1, 2),
         lm_head_weight=torch.zeros(4, 2),
@@ -53,7 +54,7 @@ def test_sampler_replays_active_request_support_and_preserves_raw_logits(
         def from_local_logits(self, logits, ids, **kwargs):
             calls.append("dense")
             assert torch.equal(logits, torch.arange(4).reshape(1, 4).float())
-            assert kwargs["temperature"] == 0.7
+            assert kwargs["temperature"] == temperature
             return torch.tensor([-2.5])
 
         def from_local_logits_sparse_nucleus(self, logits, ids, replay_ids, **kwargs):
@@ -75,6 +76,11 @@ def test_sampler_replays_active_request_support_and_preserves_raw_logits(
         if worker
         else SimpleNamespace(top_p=torch.tensor([top_p]))
     )
+    class RocmTemperature:
+        def __lt__(self, other):
+            raise AssertionError("ROCm must not execute unused CUDA greedy preprocessing")
+
+    metadata.temperature = RocmTemperature()
     op = operators.VllmLogpOperator(native, worker_sampler=worker, strict_linear_logp=True)
     actual = op(sampler, torch.arange(8).reshape(1, 8).float(), metadata)
     assert calls == (["dense", "top_p"] if top_p < 1 else ["dense"])

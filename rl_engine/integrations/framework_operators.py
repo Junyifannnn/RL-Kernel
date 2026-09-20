@@ -2336,12 +2336,16 @@ class VllmLogpOperator:
         if sampling_temperature is None:
             sampling_temperature = 1.0
         support_temperature = sampling_temperature
-        if isinstance(sampling_temperature, torch.Tensor):
-            sampling_temperature = torch.where(
-                sampling_temperature < 1e-5, 1.0, sampling_temperature
-            )
-        elif sampling_temperature < 1e-5:
-            sampling_temperature = 1.0
+        if torch.version.hip is None:
+            # CUDA supports greedy sampling here. ROCm uses the command's
+            # positive scalar temperature inside the shared HIP scorer, as in
+            # the historical path; do not launch unused CUDA preprocessing.
+            if isinstance(sampling_temperature, torch.Tensor):
+                sampling_temperature = torch.where(
+                    sampling_temperature < 1e-5, 1.0, sampling_temperature
+                )
+            elif sampling_temperature < 1e-5:
+                sampling_temperature = 1.0
         if self._strict_linear_logp:
             context = take_rollout_linear_logp_context()
             if source_logits.ndim != 2:
