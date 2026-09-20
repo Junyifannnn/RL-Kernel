@@ -9,11 +9,12 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("width", [3, 65, 129, 513])
+@pytest.mark.parametrize("width", [3, 65, 128, 129, 513])
 @pytest.mark.parametrize("temperature", [0.7, 1.3])
-def test_complete_support_forward_backward_and_row_batching(width, temperature):
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16, torch.float16])
+def test_complete_support_forward_backward_and_row_batching(width, temperature, dtype):
     torch.manual_seed(29)
-    logits = torch.randn(3, 1024, device="cuda", requires_grad=True)
+    logits = torch.randn(3, 1024, device="cuda", dtype=dtype, requires_grad=True)
     ids = torch.arange(width, device="cuda").expand(3, -1).contiguous()
     targets = torch.tensor([0, 1, 2], device="cuda")
     wrapper = LinearLogpWrapper()
@@ -33,7 +34,7 @@ def test_complete_support_forward_backward_and_row_batching(width, temperature):
         )
 
     actual, entropy = score(logits, ids, targets)
-    expected = torch.log_softmax(logits[:, :width] / temperature, dim=-1)
+    expected = torch.log_softmax(logits[:, :width].float() / temperature, dim=-1)
     torch.testing.assert_close(actual, expected[torch.arange(3), targets], atol=3e-6, rtol=2e-6)
     torch.testing.assert_close(entropy, -(expected.exp() * expected).sum(-1), atol=3e-6, rtol=2e-6)
     assert not entropy.requires_grad
@@ -41,14 +42,19 @@ def test_complete_support_forward_backward_and_row_batching(width, temperature):
     expected_grad = -expected.detach().exp()
     expected_grad[torch.arange(3), targets] += 1
     expected_grad /= temperature
-    torch.testing.assert_close(logits.grad[:, :width], expected_grad, atol=3e-6, rtol=3e-6)
+    torch.testing.assert_close(
+        logits.grad[:, :width], expected_grad.to(dtype),
+        atol=3e-6, rtol=max(3e-6, torch.finfo(dtype).eps)
+    )
     assert torch.count_nonzero(logits.grad[:, width:]) == 0
     # Arbitrary support width and batching must not change a row's bit pattern.
-    one, _ = score(logits[:1].detach(), ids[:1], targets[:1])
+    one, one_entropy = score(logits[:1].detach(), ids[:1], targets[:1])
     padded_ids = torch.nn.functional.pad(ids, (0, 31), value=-1)
-    padded, _ = score(logits.detach(), padded_ids, targets)
+    padded, padded_entropy = score(logits.detach(), padded_ids, targets)
     assert torch.equal(one.view(torch.int32), actual[:1].view(torch.int32))
     assert torch.equal(padded.view(torch.int32), actual.view(torch.int32))
+    assert torch.equal(one_entropy.view(torch.int32), entropy[:1].view(torch.int32))
+    assert torch.equal(padded_entropy.view(torch.int32), entropy.view(torch.int32))
 
 
 def test_duplicate_support_ids_do_not_change_probability():

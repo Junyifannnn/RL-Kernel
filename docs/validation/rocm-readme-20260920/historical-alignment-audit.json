@@ -1,0 +1,691 @@
+{
+  "scope": "Historical G11 loop-unrolling restoration, complete-support transport unchanged; no new end-to-end training run.",
+  "historical_source_seals": {
+    "rl_kernel": {
+      "path": "/workspace/pr400-stability-zhe-20260915/source-main-1d742b1c/rl-kernel",
+      "recorded_revision": "1d742b1ccb2eeef8a9edc73127f20a04a013c5f0",
+      "current_revision": "1d742b1ccb2eeef8a9edc73127f20a04a013c5f0",
+      "recorded_diff_sha256": "c84b5ce3c1bdbf5b89e19c903715d7bb02e9749d933606cb650a7b252ce7ae4b",
+      "current_diff_sha256": "c84b5ce3c1bdbf5b89e19c903715d7bb02e9749d933606cb650a7b252ce7ae4b",
+      "historical_seal_matches": true
+    },
+    "vime": {
+      "path": "/workspace/pr400-stability-zhe-20260915/source-v5/vime",
+      "recorded_revision": "c80200e7aef08edc918e50a3998ea981bd689934",
+      "current_revision": "c80200e7aef08edc918e50a3998ea981bd689934",
+      "recorded_diff_sha256": "3c9eae5a11dc09757bf4a8b4ce9e861c65b83e2bb0ef5d3cc5d95e6ae7cc4a18",
+      "current_diff_sha256": "3c9eae5a11dc09757bf4a8b4ce9e861c65b83e2bb0ef5d3cc5d95e6ae7cc4a18",
+      "historical_seal_matches": true
+    },
+    "megatron": {
+      "path": "/workspace/pr400-stability-zhe-20260915/source-v5/megatron",
+      "recorded_revision": "1dcf0dafa884ad52ffb243625717a3471643e087",
+      "current_revision": "1dcf0dafa884ad52ffb243625717a3471643e087",
+      "recorded_diff_sha256": "6a9cf5de9697c92da1f7a1de9bbd0364a5074cf59102360304a88381ef837d27",
+      "current_diff_sha256": "6a9cf5de9697c92da1f7a1de9bbd0364a5074cf59102360304a88381ef837d27",
+      "historical_seal_matches": true
+    }
+  },
+  "historical_reference": {
+    "native_mean_step_seconds": 99.243,
+    "strict_mean_step_seconds": 99.0377,
+    "steps": 200,
+    "reuse": true,
+    "first_three_step_native_mean": 90.6144,
+    "first_three_step_strict_mean": 98.3222
+  },
+  "numerical_tests": {
+    "returncode": 0,
+    "output": "...................................                                      [100%]\n35 passed in 4.40s\n"
+  },
+  "source_sha256": {
+    "csrc/hip/hip_deterministic_logp_kernel.hip": "f99a3129785795ef8fc467e7ca5e08cbb0cb14dce7034c622d0aecee1eb365c3",
+    "tests/test_rocm_sparse_nucleus.py": "3071064cfc93090427664c73cb97cb5e94c612bf69ddb824e1fa6f63c5830c13"
+  },
+  "kernel_benchmarks": {
+    "baseline": {
+      "extension": "/workspace/rocm-readme-20260920/rl-kernel/rl_engine/_C.cpython-312-x86_64-linux-gnu.so",
+      "sha256": "1b24557fef123ec2741bcfbb632b612eeea5228571a12e878ce163c159b3bb16",
+      "cases": [
+        {
+          "rows": 1,
+          "width": 128,
+          "ms": 0.055669002532958985,
+          "samples": [
+            0.0557978105545044,
+            0.0556649112701416,
+            0.05567874431610107,
+            0.055688848495483396,
+            0.055658178329467775,
+            0.055669002532958985,
+            0.05566699981689453
+          ],
+          "digest": "05490d36232db4420dcd72a6246c185b54a0310f5a4bcf78f6a3700773cddf71"
+        },
+        {
+          "rows": 1,
+          "width": 159,
+          "ms": 0.06552648544311523,
+          "samples": [
+            0.06553412437438964,
+            0.06546536922454833,
+            0.0655042600631714,
+            0.06552650928497314,
+            0.06553550720214844,
+            0.06552608489990235,
+            0.06552648544311523
+          ],
+          "digest": "cdc6c62ae16399b0a370173980a273cfb9943a78e9e489a4df8d61fedb9927c9"
+        },
+        {
+          "rows": 4,
+          "width": 128,
+          "ms": 0.056104416847229006,
+          "samples": [
+            0.05614490032196045,
+            0.056103816032409666,
+            0.05609579563140869,
+            0.0561244535446167,
+            0.05606692790985107,
+            0.056104416847229006,
+            0.05610593795776367
+          ],
+          "digest": "18f22f4c00b07c3a84de18db69048cc7ea45582354efb8eca91a08159a1f32a9"
+        },
+        {
+          "rows": 4,
+          "width": 159,
+          "ms": 0.0660484218597412,
+          "samples": [
+            0.06606384754180908,
+            0.06603438377380372,
+            0.0660484218597412,
+            0.06608971118927003,
+            0.06606932163238526,
+            0.06604787826538086,
+            0.06603364944458008
+          ],
+          "digest": "a3708af710c0de9bd3cb592e9d2e01234eb09b5ef9bb6579af7d202ec836a047"
+        },
+        {
+          "rows": 8,
+          "width": 128,
+          "ms": 0.05614669799804688,
+          "samples": [
+            0.05619823455810547,
+            0.056143512725830076,
+            0.05614669799804688,
+            0.05617417335510254,
+            0.05614550590515137,
+            0.05614931583404541,
+            0.056140294075012205
+          ],
+          "digest": "ae281092c2539d49bdc66f48641962201fd5a605dad97d46fec4db7ce6fbe966"
+        },
+        {
+          "rows": 8,
+          "width": 159,
+          "ms": 0.06610238075256347,
+          "samples": [
+            0.06612146854400634,
+            0.06610423564910889,
+            0.06609040260314941,
+            0.06610083103179931,
+            0.06611686706542969,
+            0.06610157489776611,
+            0.06610238075256347
+          ],
+          "digest": "15b9e2e8044658e357a8cb4f1fbf8c007377ed81fc2195bfb6ea363792ee7ec9"
+        },
+        {
+          "rows": 4096,
+          "width": 128,
+          "ms": 0.06551608562469483,
+          "samples": [
+            0.0654949951171875,
+            0.06549800395965576,
+            0.06549102306365967,
+            0.06553272247314453,
+            0.06553172111511231,
+            0.06551608562469483,
+            0.06552590370178223
+          ],
+          "digest": "299c57cb2b7b0d60b04145380b8d27d88837c3a39eb465915eef374114809883"
+        },
+        {
+          "rows": 4096,
+          "width": 159,
+          "ms": 0.07645973205566406,
+          "samples": [
+            0.07644809246063232,
+            0.07640359878540039,
+            0.07647616386413575,
+            0.07645973205566406,
+            0.0764441156387329,
+            0.07646556854248047,
+            0.07646476268768311
+          ],
+          "digest": "f0c666daa2dc6e745e925094a9481d15d93cd02b30a1f94f692096477eaa260b"
+        }
+      ]
+    },
+    "aligned": {
+      "extension": "/workspace/rocm-readme-20260920/rl-kernel/rl_engine/_C.cpython-312-x86_64-linux-gnu.so",
+      "sha256": "4d599f9dc00ff8bcd71e2e9264936a2134d4729c9e7226caf26d399210cf74dd",
+      "cases": [
+        {
+          "rows": 1,
+          "width": 128,
+          "ms": 0.045678906440734864,
+          "samples": [
+            0.04580238342285156,
+            0.045678906440734864,
+            0.04565204620361328,
+            0.04566146850585937,
+            0.04567433834075928,
+            0.04570120334625244,
+            0.045679359436035155
+          ],
+          "digest": "05490d36232db4420dcd72a6246c185b54a0310f5a4bcf78f6a3700773cddf71"
+        },
+        {
+          "rows": 1,
+          "width": 159,
+          "ms": 0.054438209533691405,
+          "samples": [
+            0.054452319145202634,
+            0.05442417621612549,
+            0.05445384502410889,
+            0.054438610076904294,
+            0.054438209533691405,
+            0.054427785873413084,
+            0.05442178249359131
+          ],
+          "digest": "cdc6c62ae16399b0a370173980a273cfb9943a78e9e489a4df8d61fedb9927c9"
+        },
+        {
+          "rows": 4,
+          "width": 128,
+          "ms": 0.046130213737487796,
+          "samples": [
+            0.04617963790893555,
+            0.0461237096786499,
+            0.04613734722137451,
+            0.046162281036376956,
+            0.04611838340759277,
+            0.046130213737487796,
+            0.0461240005493164
+          ],
+          "digest": "18f22f4c00b07c3a84de18db69048cc7ea45582354efb8eca91a08159a1f32a9"
+        },
+        {
+          "rows": 4,
+          "width": 159,
+          "ms": 0.05493926525115967,
+          "samples": [
+            0.05496391773223877,
+            0.05493926525115967,
+            0.054933290481567386,
+            0.05494271278381348,
+            0.05495334148406982,
+            0.05493690013885498,
+            0.05493730068206787
+          ],
+          "digest": "a3708af710c0de9bd3cb592e9d2e01234eb09b5ef9bb6579af7d202ec836a047"
+        },
+        {
+          "rows": 8,
+          "width": 128,
+          "ms": 0.04619886875152588,
+          "samples": [
+            0.04625593662261963,
+            0.04618783950805664,
+            0.04619886875152588,
+            0.046221318244934084,
+            0.04619966983795166,
+            0.046184840202331545,
+            0.04618143081665039
+          ],
+          "digest": "ae281092c2539d49bdc66f48641962201fd5a605dad97d46fec4db7ce6fbe966"
+        },
+        {
+          "rows": 8,
+          "width": 159,
+          "ms": 0.05499967575073242,
+          "samples": [
+            0.05503715038299561,
+            0.05499866962432862,
+            0.05499967575073242,
+            0.055017714500427244,
+            0.05498544692993164,
+            0.05498785018920899,
+            0.05500285148620605
+          ],
+          "digest": "15b9e2e8044658e357a8cb4f1fbf8c007377ed81fc2195bfb6ea363792ee7ec9"
+        },
+        {
+          "rows": 4096,
+          "width": 128,
+          "ms": 0.0530171537399292,
+          "samples": [
+            0.052997288703918455,
+            0.05301673412322998,
+            0.053028564453125,
+            0.05304901123046875,
+            0.053012723922729495,
+            0.0530171537399292,
+            0.053026580810546876
+          ],
+          "digest": "299c57cb2b7b0d60b04145380b8d27d88837c3a39eb465915eef374114809883"
+        },
+        {
+          "rows": 4096,
+          "width": 159,
+          "ms": 0.06315442562103271,
+          "samples": [
+            0.06312819004058838,
+            0.06313380718231201,
+            0.06316928386688232,
+            0.06318228721618652,
+            0.06316745281219482,
+            0.06314961433410644,
+            0.06315442562103271
+          ],
+          "digest": "f0c666daa2dc6e745e925094a9481d15d93cd02b30a1f94f692096477eaa260b"
+        }
+      ]
+    }
+  },
+  "kernel_comparison": [
+    {
+      "rows": 1,
+      "width": 128,
+      "baseline_ms": 0.055669002532958985,
+      "aligned_ms": 0.045678906440734864,
+      "change_percent": -17.945527380896497,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 1,
+      "width": 159,
+      "baseline_ms": 0.06552648544311523,
+      "aligned_ms": 0.054438209533691405,
+      "change_percent": -16.921823037571226,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 4,
+      "width": 128,
+      "baseline_ms": 0.056104416847229006,
+      "aligned_ms": 0.046130213737487796,
+      "change_percent": -17.777928495185556,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 4,
+      "width": 159,
+      "baseline_ms": 0.0660484218597412,
+      "aligned_ms": 0.05493926525115967,
+      "change_percent": -16.8197154387317,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 8,
+      "width": 128,
+      "baseline_ms": 0.05614669799804688,
+      "aligned_ms": 0.04619886875152588,
+      "change_percent": -17.717567730994688,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 8,
+      "width": 159,
+      "baseline_ms": 0.06610238075256347,
+      "aligned_ms": 0.05499967575073242,
+      "change_percent": -16.79622560553613,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 4096,
+      "width": 128,
+      "baseline_ms": 0.06551608562469483,
+      "aligned_ms": 0.0530171537399292,
+      "change_percent": -19.077653625958433,
+      "bitwise_digest_matches": true
+    },
+    {
+      "rows": 4096,
+      "width": 159,
+      "baseline_ms": 0.07645973205566406,
+      "aligned_ms": 0.06315442562103271,
+      "change_percent": -17.40171731826741,
+      "bitwise_digest_matches": true
+    }
+  ],
+  "replay": {
+    "configuration": {
+      "gpus": 8,
+      "tp_per_replica": 4,
+      "replicas": 2,
+      "prompts_per_replica": 4,
+      "prefix_tokens": 3072,
+      "decode_tokens": 512,
+      "temperature": 0.7,
+      "top_p": 0.95,
+      "cpu_affinity": "inherited; AMD_CPU_AFFINITY=0",
+      "order": [
+        "baseline",
+        "aligned",
+        "aligned",
+        "baseline"
+      ],
+      "measurements_per_variant": 6,
+      "support_capacity": "complete dynamic support in both variants"
+    },
+    "raw_replicas": [
+      {
+        "scope": "Unprofiled fixed replay; only sparse HIP forward binary changes. Complete support retained in both variants.",
+        "worker_config": [
+          {
+            "rank": 0,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          },
+          {
+            "rank": 1,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          },
+          {
+            "rank": 2,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          },
+          {
+            "rank": 3,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          }
+        ],
+        "rows": [
+          {
+            "variant": "baseline",
+            "seconds": 4.288848947267979,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.290080533362925,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.29484522016719,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.293889671098441,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.296399895101786,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.272430781740695,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.327048304025084,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.3203980550169945,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.302974991966039,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.277999373152852,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.307339657098055,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.288473435211927,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          }
+        ]
+      },
+      {
+        "scope": "Unprofiled fixed replay; only sparse HIP forward binary changes. Complete support retained in both variants.",
+        "worker_config": [
+          {
+            "rank": 0,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          },
+          {
+            "rank": 1,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          },
+          {
+            "rank": 2,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          },
+          {
+            "rank": 3,
+            "variant": "baseline",
+            "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+            "worker_sampler": true
+          }
+        ],
+        "rows": [
+          {
+            "variant": "baseline",
+            "seconds": 4.261020554695278,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.229866357985884,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.246204111725092,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.2233154065907,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.239957674406469,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.221039548050612,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.237781890202314,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.21432591509074,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "aligned",
+            "seconds": 4.215568074956536,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.222010876052082,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.222132582217455,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          },
+          {
+            "variant": "baseline",
+            "seconds": 4.241455975919962,
+            "tokens": 2048,
+            "token_and_selected_logprob_sha256": "cb4be1fd874e45a30bb55a91208646c8b3783b0e968ee72e86eb733298803749"
+          }
+        ]
+      }
+    ],
+    "paired_max_seconds": [
+      {
+        "variant": "baseline",
+        "seconds": 4.288848947267979,
+        "tokens": 4096
+      },
+      {
+        "variant": "baseline",
+        "seconds": 4.290080533362925,
+        "tokens": 4096
+      },
+      {
+        "variant": "baseline",
+        "seconds": 4.29484522016719,
+        "tokens": 4096
+      },
+      {
+        "variant": "aligned",
+        "seconds": 4.293889671098441,
+        "tokens": 4096
+      },
+      {
+        "variant": "aligned",
+        "seconds": 4.296399895101786,
+        "tokens": 4096
+      },
+      {
+        "variant": "aligned",
+        "seconds": 4.272430781740695,
+        "tokens": 4096
+      },
+      {
+        "variant": "aligned",
+        "seconds": 4.327048304025084,
+        "tokens": 4096
+      },
+      {
+        "variant": "aligned",
+        "seconds": 4.3203980550169945,
+        "tokens": 4096
+      },
+      {
+        "variant": "aligned",
+        "seconds": 4.302974991966039,
+        "tokens": 4096
+      },
+      {
+        "variant": "baseline",
+        "seconds": 4.277999373152852,
+        "tokens": 4096
+      },
+      {
+        "variant": "baseline",
+        "seconds": 4.307339657098055,
+        "tokens": 4096
+      },
+      {
+        "variant": "baseline",
+        "seconds": 4.288473435211927,
+        "tokens": 4096
+      }
+    ],
+    "mean_seconds": {
+      "baseline": 4.291264527710155,
+      "aligned": 4.302190283158173
+    },
+    "change_percent": 0.2546045664970631,
+    "within_replica_token_and_selected_logprob_digests_match": true
+  },
+  "limitations": [
+    "Only sparse HIP forward implementation switches during replay; baseline means pre-restoration v12, not historical G10 native.",
+    "No new 200-step mean or end-to-end step-time advantage is established.",
+    "Historical G10 VIME seal is no longer reproducible from the shared directory; historical vLLM was not sealed.",
+    "Complete-support per-token synchronization remains; historical capacity-64 assertion cannot replace it without restricting valid support."
+  ],
+  "historical_first_three_steps_vs_200_steps": "Historical G11/G10 first-three-step mean was 98.3222/90.6144 seconds (+8.506%), while the 200-step difference was -0.2069%; the 200-step percentage is not a per-step constant.",
+  "implementation_comparison": {
+    "unchanged": [
+      "Triton chunked Attention source",
+      "deterministic GEMM HIP source",
+      "deterministic collective HIP source",
+      "shared sparse logp and monitoring-entropy arithmetic",
+      "materialized LM-head logits reuse"
+    ],
+    "restored": "128-column compile-time loop specialization and unrolling; dynamic width fallback remains.",
+    "retained_corrections": [
+      "complete top-p support instead of capacity-64 asynchronous overflow failure",
+      "clone raw logits before samplers that can mutate input",
+      "CP canonical ordering and gradient-replica corrections",
+      "CPU sparse-ID assembly with one device copy"
+    ],
+    "inactive_at_tested_topology": [
+      "canonical TP multi-chunk projections (physical TP=canonical TP=4)",
+      "rollout PCP transport (rollout CP=1)"
+    ],
+    "reuse": "Historical G11 enabled get_mismatch_metrics, so it already independently recomputed training logprobs even with reuse enabled. Current default remains reuse disabled.",
+    "historical_vllm_seal": "Not recorded; the preserved vLLM checkout is corroborating source evidence, not a certified historical snapshot."
+  }
+}

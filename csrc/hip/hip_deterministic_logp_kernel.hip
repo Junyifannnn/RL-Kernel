@@ -161,7 +161,7 @@ __device__ __forceinline__ float sparse_log(float value) {
 // Compact top-p replay uses a fixed serial arithmetic order per row. Keeping
 // this in the pre-built HIP extension makes vLLM and Megatron execute the same
 // code object rather than independently specializing a Triton kernel.
-template <typename scalar_t>
+template <typename scalar_t, int FixedColumns = 0>
 __global__ void __launch_bounds__(1) hip_sparse_nucleus_forward_kernel(
     const scalar_t* __restrict__ logits,
     const int64_t* __restrict__ ids,
@@ -174,10 +174,14 @@ __global__ void __launch_bounds__(1) hip_sparse_nucleus_forward_kernel(
     int64_t rows, int64_t columns) {
     const int64_t row = static_cast<int64_t>(blockIdx.x);
     if (row >= rows) return;
-    const int64_t row_offset = row * columns;
+    // Match the historical 128-column code object on the common path, while
+    // preserving complete support for larger nuclei with the dynamic variant.
+    const int64_t width = FixedColumns ? FixedColumns : columns;
+    const int64_t row_offset = row * width;
     const float scale = inverse_temperature[row];
     float row_max = -std::numeric_limits<float>::infinity();
-    for (int column = 0; column < columns; ++column) {
+#pragma unroll
+    for (int column = 0; column < width; ++column) {
         const int64_t offset = row_offset + column;
         if (valid[offset]) {
             row_max = fmaxf(row_max, static_cast<float>(logits[offset]) * scale);
@@ -185,7 +189,8 @@ __global__ void __launch_bounds__(1) hip_sparse_nucleus_forward_kernel(
     }
     float row_sum = 0.0f;
     float selected = 0.0f;
-    for (int column = 0; column < columns; ++column) {
+#pragma unroll
+    for (int column = 0; column < width; ++column) {
         const int64_t offset = row_offset + column;
         if (valid[offset]) {
             const float scaled = static_cast<float>(logits[offset]) * scale;
@@ -201,7 +206,8 @@ __global__ void __launch_bounds__(1) hip_sparse_nucleus_forward_kernel(
     // full-vocabulary entropy operator a second time.
     const float inverse_sum = sparse_reciprocal(row_sum);
     float row_entropy = 0.0f;
-    for (int column = 0; column < columns; ++column) {
+#pragma unroll
+    for (int column = 0; column < width; ++column) {
         const int64_t offset = row_offset + column;
         if (valid[offset]) {
             const float scaled = static_cast<float>(logits[offset]) * scale;
@@ -597,10 +603,17 @@ std::vector<torch::Tensor> hip_sparse_nucleus_logp_forward(
     AT_DISPATCH_FLOATING_TYPES_AND2(
         at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(),
         "hip_sparse_nucleus_logp_forward", ([&] {
-            hip_sparse_nucleus_forward_kernel<scalar_t><<<rows, 1, 0, stream>>>(
+            if (columns == Columns) {
+                hip_sparse_nucleus_forward_kernel<scalar_t, Columns><<<rows, 1, 0, stream>>>(
+                    input.data_ptr<scalar_t>(), ids_c.data_ptr<int64_t>(), valid_c.data_ptr<bool>(),
+                    targets_c.data_ptr<int64_t>(), inverse_c.data_ptr<float>(),
+                    result.data_ptr<float>(), lse.data_ptr<float>(), entropy.data_ptr<float>(), rows, columns);
+            } else {
+                hip_sparse_nucleus_forward_kernel<scalar_t><<<rows, 1, 0, stream>>>(
                 input.data_ptr<scalar_t>(), ids_c.data_ptr<int64_t>(), valid_c.data_ptr<bool>(),
                 targets_c.data_ptr<int64_t>(), inverse_c.data_ptr<float>(),
                 result.data_ptr<float>(), lse.data_ptr<float>(), entropy.data_ptr<float>(), rows, columns);
+            }
         }));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return {result, lse, entropy};

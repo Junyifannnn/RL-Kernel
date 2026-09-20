@@ -211,3 +211,50 @@ unresolved.
 
 See the [full final-pair audit](../validation/rocm-readme-20260920/final-affinity-pair-audit.json)
 for per-step metrics, source hashes, CPU-mask observations and validation errors.
+
+## Direct comparison with the historical G11 implementation
+
+The saved G11 RL-Kernel, VIME and Megatron revision/diff seals match the
+preserved source trees. Attention, deterministic GEMM and collective HIP
+sources are unchanged. Materialized LM-head logits reuse and sparse HIP
+logp/monitoring-entropy fusion are also present in both implementations.
+The historical VIME directory was subsequently modified for G11, so it no
+longer matches G10's seal; vLLM was not sealed in the historical manifest.
+This is therefore not a complete reconstruction of the G10 baseline.
+
+| Difference from historical G11 | Current handling |
+|---|---|
+| Fixed 128-column, unrolled sparse HIP forward became runtime-width loops | Restore compile-time specialization and unrolling for 128 columns; retain the dynamic fallback for larger support |
+| Capacity-64 top-p transport with asynchronous overflow failure became complete dynamic support | Retain complete support; its per-token scalar synchronization remains unresolved |
+| Raw-logit `.contiguous()` became a protective clone | Retain the clone because a contiguous one-row view can alias logits modified by the native sampler |
+| CP token/gradient ordering and gradient-replica corrections | Retain the correctness fixes |
+| GPU sparse-ID assembly became CPU assembly followed by one copy | Retain the batched copy |
+| Rollout-logprob reuse was enabled | Keep it disabled, as required by the Quick start |
+
+Historical G11 also enabled mismatch metrics, so it already executed independent
+training logprob recomputation. Disabling reuse does not introduce an entire
+new recomputation forward relative to that run. At TP4/CP2 with rollout TP4/CP1,
+canonical TP is also four: newer multi-chunk projection and rollout PCP branches
+are inactive. None of these findings attributes historical timings to CPU
+contention; historical CPU-affinity telemetry is unavailable.
+
+The restored sparse forward passed **35 tests**, covering FP32/BF16/FP16,
+temperature 0.7/1.3, widths 3/65/128/129/513, gradients, exact batching/padding
+invariance for logp and monitoring entropy, and raw-logit preservation.
+Isolated 128-column forward time fell 17.7–19.1% for 1/4/8/4096 rows; all
+eight before/after forward-output digests matched.
+
+An unprofiled dual-TP4 replay then switched only the sparse forward binary in
+the same workers. Each replica generated four fixed 3072-token prefixes plus
+512 new tokens at temperature 0.7/top-p 0.95. Both variants retained complete
+support and the same CPU allocation. In baseline/aligned/aligned/baseline
+order, with warmups and six measurements per variant, mean paired maximum
+replica time was **4.2913 / 4.3022 seconds (+0.25%)**. All 24 replay outputs
+had matching token/selected-logprob digests within their replica. There is
+no demonstrated rollout speedup from this kernel change in this workload.
+
+No new end-to-end training result or 200-step performance advantage is claimed.
+Historical G11/G10 first-three-step means were 98.3222/90.6144 seconds (+8.506%),
+even though the 200-step means differed by -0.2069%; that percentage is not
+a constant per-step advantage. The historical performance target remains open.
+See the [source comparison, numerical checks and raw replay measurements](../validation/rocm-readme-20260920/historical-alignment-audit.json).
