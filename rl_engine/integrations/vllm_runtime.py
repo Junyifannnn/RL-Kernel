@@ -1522,7 +1522,13 @@ def _patch_tokens_api_top_logprobs() -> None:
     """Preserve token IDs on tokens-only API top-logprob entries."""
 
     from vllm.entrypoints.openai.chat_completion.protocol import ChatCompletionLogProb
-    from vllm.entrypoints.serve.disagg.serving import ServingTokens
+    try:
+        from vllm.entrypoints.serve.disagg.serving import ServingTokens
+    except ModuleNotFoundError as exc:
+        if not exc.name or not "vllm.entrypoints.serve.disagg".startswith(exc.name):
+            raise
+        # vLLM 0.26 moved the tokens endpoint used by ROCm.
+        from vllm.entrypoints.scale_out.token_in_token_out.serving import ServingTokens
 
     if hasattr(ServingTokens, _STRICT_TOKENS_LOGPROBS_PATCH_MARKER):
         return

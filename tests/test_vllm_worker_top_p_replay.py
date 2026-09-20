@@ -56,8 +56,12 @@ def test_sampler_replays_active_request_support_and_preserves_raw_logits(
             assert kwargs["temperature"] == 0.7
             return torch.tensor([-2.5])
 
-        def from_local_logits_top_p(self, logits, ids, replay_ids, replay_values, **kwargs):
+        def from_local_logits_sparse_nucleus(self, logits, ids, replay_ids, **kwargs):
             self.from_local_logits(logits, ids, **kwargs)
+            self.provenance = {
+                **self.provenance,
+                "strict_entrypoint": "sparse_nucleus_logp_from_local_logits_tp",
+            }
             calls.append("top_p")
             assert torch.equal(replay_ids, result.logprobs_tensors.logprob_token_ids)
             return torch.tensor([-2.5])

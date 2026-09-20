@@ -2460,11 +2460,14 @@ class VllmLogpOperator:
                         )
                     top_p_replay = True
                 if top_p_replay:
-                    selected = self._linear_logp.from_local_logits_top_p(
+                    nucleus_ids = torch.where(
+                        torch.isfinite(replay_values), replay_ids,
+                        torch.full_like(replay_ids, -1),
+                    )
+                    selected = self._linear_logp.from_local_logits_sparse_nucleus(
                         local_logits,
                         token_ids,
-                        replay_ids,
-                        replay_values,
+                        nucleus_ids,
                         tp_group=context.tp_group,
                         vocab_start_index=context.vocab_start_index,
                         global_vocab_size=context.global_vocab_size,
@@ -2504,7 +2507,8 @@ class VllmLogpOperator:
                 )
             strict_provenance = self._linear_logp.provenance
             expected_entrypoints = {
-                "rocm_vocab_parallel_logp_from_local_logits_tp"
+                ("sparse_nucleus_logp_from_local_logits_tp" if top_p_replay
+                 else "rocm_vocab_parallel_logp_from_local_logits_tp")
                 if torch.version.hip is not None
                 else "sm90_deterministic_logp_from_local_logits_tp"
             }

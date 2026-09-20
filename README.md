@@ -128,7 +128,7 @@ or select a profile with RLK_REPRO_PROFILE. No launcher edits are needed.
 Both backends then use the same command:
 
 ```bash
-./rlk run --tp 2 --rollout-tp 4 --temperature 0.7 --top-p 0.95 --steps 200
+./rlk run --tp 4 --rollout-tp 4 --temperature 0.7 --top-p 0.95 --lr 5e-7 --steps 200
 ```
 
 Training TP and rollout TP are independent: choose 1, 2, 4 or 8. Training CP
@@ -136,6 +136,27 @@ defaults to 8 / TP; set --cp explicitly if needed. run waits, validates
 train/rollout LogP, and defaults to consistency mode without rollout-logprob reuse.
 Add --mode native for a native comparison, or replace run with plan to
 inspect the command without launching a job.
+
+For the ROCm MI300X G11 performance configuration, use:
+
+```bash
+./rlk run --tp 4 --cp 2 --rollout-tp 4 --temperature 0.7 --top-p 0.95 \
+  --lr 5e-7 --kl-coef 0.01 --max-response-len 6912 \
+  --grpo-std-normalization disabled --steps 200
+```
+
+The ROCm consistency route uses Triton chunked Attention, reuses the LM-head
+logits, and fuses sparse top-p logprob with monitoring entropy. Training logprobs
+are independently recomputed; rollout-logprob reuse stays **off**. Parameters
+above are command-line choices, not kernel constants. Use the updated ROCm
+companion patches and rebuild the extension after updating this checkout.
+Add `--mode native` to the same command for the comparison.
+
+The historical 200-step result was 62.47 vs 59.70 end-to-end tok/GPU/s
+(G11 4.44% lower); both historical runs enabled rollout-logprob reuse and
+generated different token counts. This is a reference measurement, not a
+performance guarantee for the current no-reuse command or other topologies.
+See [ROCm performance reproduction](./docs/usage/rocm-sparse-performance.md).
 
 On CUDA, rollout CP and top-k are configurable too; this short check performs
 two real updates and validates their artifacts:

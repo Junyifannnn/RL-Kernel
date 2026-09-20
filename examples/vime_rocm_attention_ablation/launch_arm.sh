@@ -230,6 +230,7 @@ for name in (
     "RL_KERNEL_ROCM_PAGED_KV_MAX_TOKENS",
     "RL_KERNEL_DET_GEMM_BACKEND",
     "RL_KERNEL_ROCM_ATTENTION_BACKEND",
+    "RL_KERNEL_SPARSE_TOP_P_REPLAY",
 ):
     if name in os.environ:
         env_vars[name] = os.environ[name]
@@ -287,6 +288,10 @@ if [[ "${RL_KERNEL_LOGP_CASE%%/*}" == "R" ]]; then
     --linear-logp-provider-mode strict
   )
 fi
+GRPO_ARGS=()
+if [[ "${RLK_ABLATION_DISABLE_GRPO_STD_NORMALIZATION:-0}" == "1" ]]; then
+  GRPO_ARGS+=(--disable-grpo-std-normalization)
+fi
 ROLLOUT_LOGPROBS_ARGS=()
 if [[ "${RLK_ABLATION_USE_ROLLOUT_LOGPROBS:-0}" == "1" ]]; then
   ROLLOUT_LOGPROBS_ARGS+=(--use-rollout-logprobs)
@@ -341,6 +346,7 @@ ray job submit \
   --adam-beta1 0.9 \
   --adam-beta2 0.98 \
   --advantage-estimator grpo \
+  "${GRPO_ARGS[@]}" \
   --entropy-coef 0 \
   --eps-clip 0.2 \
   --eps-clip-high 0.28 \

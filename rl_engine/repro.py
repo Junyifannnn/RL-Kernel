@@ -480,7 +480,10 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         raise ReproError("--max-response-len must be positive")
     if args.max_tokens_per_gpu is not None and args.max_tokens_per_gpu <= 0:
         raise ReproError("--max-tokens-per-gpu must be positive")
-    if args.vllm_gpu_memory_utilization is not None and not 0 < args.vllm_gpu_memory_utilization < 1:
+    if (
+        args.vllm_gpu_memory_utilization is not None
+        and not 0 < args.vllm_gpu_memory_utilization < 1
+    ):
         raise ReproError("--vllm-gpu-memory-utilization must be in (0, 1)")
     if getattr(args, "backend", "cuda") == "rocm":
         _validate_topology_args(args)
@@ -515,6 +518,7 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
             "rollout-temperature": args.rollout_temperature,
             "rollout-top-p": args.rollout_top_p,
             "rollout-top-k": args.rollout_top_k,
+            "grpo-std-normalization": args.grpo_std_normalization,
             "lr": args.lr,
             "weight-decay": args.weight_decay,
             "kl-coef": args.kl_coef,
@@ -533,9 +537,13 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
         if args.allow_dirty:
             raise ReproError("ROCm requires frozen source checks; --allow-dirty is not supported")
         if "--ray-address" in getattr(args, "explicit_flags", set()):
-            raise ReproError("ROCm manages its Ray instance via --ray-port and --ray-dashboard-port")
+            raise ReproError(
+                "ROCm manages its Ray instance via --ray-port and --ray-dashboard-port"
+            )
         if args.command == "verify" or args.require_updates:
-            raise ReproError("ROCm does not yet implement the weight-update verify contract; use run for train/rollout logprob validation")
+            raise ReproError(
+                "ROCm does not yet implement the weight-update verify contract; use run for train/rollout logprob validation"
+            )
         if args.rollout_top_k != -1:
             raise ReproError("strict ROCm top-k replay is not supported; use --top-k -1")
         if args.vllm_gpu_memory_utilization is not None:
@@ -552,11 +560,18 @@ def _runner_command(paths: Paths, profile: dict[str, Any], args: argparse.Namesp
             if value is not None:
                 command.extend([f"--{name.replace('_', '-')}", str(value)])
         return command
+    if args.grpo_std_normalization != "enabled":
+        raise ReproError("--grpo-std-normalization disabled currently requires --backend rocm")
     rocm_only = [
-        name for name in (
-            "ray_port", "ray_dashboard_port", "samples_per_prompt", "global_batch_size",
+        name
+        for name in (
+            "ray_port",
+            "ray_dashboard_port",
+            "samples_per_prompt",
+            "global_batch_size",
             "rollout_batch_size",
-        ) if getattr(args, name, None) is not None
+        )
+        if getattr(args, name, None) is not None
     ]
     if rocm_only:
         raise ReproError("these workload options require --backend rocm: " + ", ".join(rocm_only))
@@ -915,8 +930,16 @@ def build_parser() -> argparse.ArgumentParser:
         )
         command_parser.add_argument("--rollout-top-k", "--top-k", type=int, default=-1)
         command_parser.add_argument(
-            "--max-tokens-per-gpu", type=int, default=None,
+            "--max-tokens-per-gpu",
+            type=int,
+            default=None,
             help="training microbatch token budget per CP rank; defaults to 1024 / CP, preserving the logical microbatch budget",
+        )
+        command_parser.add_argument(
+            "--grpo-std-normalization",
+            choices=("enabled", "disabled"),
+            default="enabled",
+            help="ROCm GRPO advantage normalization",
         )
         command_parser.add_argument("--lr", type=float, default=5e-7)
         command_parser.add_argument("--weight-decay", type=float, default=0.1)
@@ -924,7 +947,10 @@ def build_parser() -> argparse.ArgumentParser:
             "--kl-coef", type=float, default=0.01 if command == "verify" else 0.0
         )
         command_parser.add_argument(
-            "--max-response-len", "--max-response-length", type=int, default=512 if command == "verify" else None
+            "--max-response-len",
+            "--max-response-length",
+            type=int,
+            default=512 if command == "verify" else None,
         )
         command_parser.add_argument(
             "--require-updates", action="store_true", default=command == "verify"
@@ -982,6 +1008,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "temperature",
                 "top-p",
                 "top-k",
+                "grpo-std-normalization",
                 "lr",
                 "weight-decay",
                 "kl-coef",

@@ -8,7 +8,6 @@
   },
   "paths": {
     "workspace": "/workspace/rocm-unified-20260919",
-    "rl_kernel_root": "/workspace/rocm-unified-20260919/rl-kernel",
     "vime_root": "/workspace/rocm-unified-20260919/vime",
     "megatron_root": "/workspace/rocm-unified-20260919/megatron",
     "vllm_root": "/workspace/rocm-unified-20260919/vllm",
