@@ -151,6 +151,8 @@ are independently recomputed; rollout-logprob reuse stays **off**. Parameters
 above are command-line choices, not kernel constants. Use the updated ROCm
 companion patches and rebuild the extension after updating this checkout.
 Add `--mode native` to the same command for the comparison.
+The ROCm launcher also preserves the inherited CPU allocation during HIP
+initialization; no extra Quick start argument is needed.
 
 The historical 200-step result was 62.47 vs 59.70 end-to-end tok/GPU/s
 (G11 4.44% lower); both historical runs enabled rollout-logprob reuse and

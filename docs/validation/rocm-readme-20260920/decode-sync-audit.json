@@ -1,0 +1,318 @@
+{
+  "scope": "Existing dual TP4 isolated replay; 4 prefixes per replica, 3072 prefix tokens, 512 generated tokens per sample; fixed-capacity variants are diagnostic only. No profiler.",
+  "replicas": [
+    {
+      "scope": "Unprofiled fixed replay; capacity64 is a diagnostic with GPU overflow assertion, not a proposed sampling limit.",
+      "worker_config": [
+        {
+          "rank": 0,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        },
+        {
+          "rank": 1,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        },
+        {
+          "rank": 2,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        },
+        {
+          "rank": 3,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        }
+      ],
+      "rows": [
+        {
+          "variant": "current",
+          "seconds": 4.24837608076632,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.227939986158162,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.287466388195753,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.2860112991184,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.275083536747843,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.263855152297765,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.845317651052028,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.854744757991284,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.850007727742195,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.824247483164072,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.8429196891374886,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.841279171872884,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.2892682841047645,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.254198451060802,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.274439997971058,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.256456564180553,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.2481002900749445,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.275606161914766,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        }
+      ]
+    },
+    {
+      "scope": "Unprofiled fixed replay; capacity64 is a diagnostic with GPU overflow assertion, not a proposed sampling limit.",
+      "worker_config": [
+        {
+          "rank": 0,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        },
+        {
+          "rank": 1,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        },
+        {
+          "rank": 2,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        },
+        {
+          "rank": 3,
+          "variant": "current",
+          "vllm_source": "/workspace/rocm-readme-20260920/vllm/vllm/v1/worker/gpu/sample/sampler.py",
+          "worker_sampler": true
+        }
+      ],
+      "rows": [
+        {
+          "variant": "current",
+          "seconds": 4.206506127957255,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.21578443236649,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.213141991291195,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.227195428684354,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.196302713826299,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.222673763986677,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.8168975710868835,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.817809535190463,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.8196935961022973,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.838828010018915,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.8355421843007207,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64",
+          "seconds": 3.8340539359487593,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.223941073287278,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.220058603212237,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "capacity64_sync",
+          "seconds": 4.201704105827957,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.2253564349375665,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.215925494208932,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        },
+        {
+          "variant": "current",
+          "seconds": 4.227465057279915,
+          "tokens": 2048,
+          "token_and_selected_logprob_sha256": "fe7f582b239cb9e802119a113e3a5ad4355d3d347fbc5bd8dfbfa980867b8f65"
+        }
+      ]
+    }
+  ],
+  "replica_exitcodes": [
+    0,
+    0
+  ],
+  "max_replica_seconds_by_variant": {
+    "current": [
+      4.24837608076632,
+      4.227939986158162,
+      4.287466388195753,
+      4.256456564180553,
+      4.2481002900749445,
+      4.275606161914766
+    ],
+    "capacity64_sync": [
+      4.2860112991184,
+      4.275083536747843,
+      4.263855152297765,
+      4.2892682841047645,
+      4.254198451060802,
+      4.274439997971058
+    ],
+    "capacity64": [
+      3.845317651052028,
+      3.854744757991284,
+      3.850007727742195,
+      3.838828010018915,
+      3.8429196891374886,
+      3.841279171872884
+    ]
+  },
+  "mean_max_replica_seconds": {
+    "current": 4.2573242452150835,
+    "capacity64_sync": 4.273809453550105,
+    "capacity64": 3.8455161679691323
+  }
+}

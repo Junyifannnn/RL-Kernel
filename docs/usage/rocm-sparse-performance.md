@@ -94,5 +94,72 @@ keeps sparse logits unscaled until the shared HIP scorer; pre-scaling them in
 the framework caused FP32 rounding differences and was corrected before this run.
 
 See the [machine-readable measurements](../validation/rocm-readme-20260920/readme-pair-audit.json)
-and [tested source mapping](../validation/rocm-readme-20260920/tested-source-equivalence.json).
-Runtime Python differences in that mapping are formatting only (equal ASTs).
+and [tested source mapping](../validation/rocm-readme-20260920/tested-source-equivalence.json)
+for revision `a2b9fd6`. Runtime Python differences in that mapping were formatting
+only (equal ASTs). The subsequent launcher affinity change is validated separately
+below; the earlier timings are not measurements of that final launcher.
+
+## Absolute timing diagnosis and CPU allocation
+
+The historical G11 and current run had the same model/data fingerprints and
+effective workload parameters. Their first-step generated token multisets were
+identical, yet rollout took 57.354 versus 86.260 seconds. The first-three-step
+rollout increase accounted for 94.06% of the total step-time increase. This
+particular gap cannot be attributed to generating longer responses.
+
+On the installed PyTorch `2.12.0+rocm7.14.0a20260608` / HIP `7.14.60850`
+runtime, `torch.cuda.is_available()` narrowed the calling thread's allowed CPU
+mask from 160 CPUs to CPUs 0-7. The full run's vLLM processes shared that mask.
+An existing one-step no-reuse control reproduced the slow rollout. A second
+one-step run widened only that experiment's vLLM actor/worker threads from
+CPUs 0-7 to the controller's 160 allowed CPUs:
+
+| One-step strict measurement | Original affinity | Widened vLLM affinity |
+|---|---:|---:|
+| Response tokens | 35,878 | 35,878 |
+| Rollout seconds | 86.2402 | 50.4340 |
+| Training seconds | 35.6649 | 50.4299 |
+| Step seconds | 125.1104 | 103.0554 |
+| Distinct train/rollout bit mismatches | 0 / 35,878 | 0 / 35,878 |
+
+Rollout time fell 41.52% and step time fell 17.63%. Token sequences and selected
+logprobs matched across runs after sorting by token sequence. Each arm passed
+the strict validator and an independent raw-bit audit of all 143,512 stored
+values including TP replicas. This is a strict/strict diagnostic comparison,
+not a native/strict performance comparison.
+
+Training time increased in this experiment. Sample order changed and the saved
+rank-0 recomputation batches increased from six to seven despite identical token
+multisets. Thus the training comparison also changed batching; it does not
+isolate an affinity cost or explain the entire training increase. The historical
+first step was 95.110 seconds, so this experiment does not establish the
+historical 0.2069% mean step-time advantage.
+
+The launcher now defaults `AMD_CPU_AFFINITY=0` before HIP initialization and
+forwards it to Ray workers in both native and consistency modes. Explicit
+operator overrides are preserved and the effective value is recorded in
+`launch.json`. This disables the runtime's affinity reset without choosing a
+CPU count or overriding an inherited `taskset` allocation. Initialization probes
+confirmed 160 CPUs stay 160; caller masks 0-7 and 80-87 also remain unchanged
+through device discovery and `torch.cuda.init()`. The actual shell exports and
+Ray runtime-env construction were checked with default, `0`, `1`, and empty
+overrides. CLI regression tests: 32 passed, one Windows symlink test skipped.
+
+The final environment default applies before initialization to training as well
+as rollout. It is not identical to the diagnostic's live vLLM-only intervention;
+no additional end-to-end run was launched after this change. Its final step
+time remains unmeasured. The Quick start still defaults to independent training
+logprobs and Triton chunked Attention with sparse logp/monitoring-entropy scoring.
+
+Another measured cost remains: complete top-p support transport reads a GPU
+scalar via `finite_counts.max().item()` on each decode step. In short dual-TP4
+replays, fixed-size transport with and without that synchronization took 4.2738
+and 3.8455 seconds (10.02% less). This is diagnostic evidence, not a production
+64-token cap or a percentage to add to the full-run affinity gain. Arbitrary
+top-p and complete support remain supported; this change does not remove that
+synchronization. Native FFN provenance and a final matched native/strict timing
+pair remain open, so the PR retains draft status.
+
+See the [one-step raw audit](../validation/rocm-readme-20260920/e2e-affinity-audit.json)
+and [launcher/initialization checks](../validation/rocm-readme-20260920/affinity-fix-verification.json),
+plus the [short decode replay measurements](../validation/rocm-readme-20260920/decode-sync-audit.json).
