@@ -22,6 +22,7 @@
 #include <c10/hip/HIPException.h>
 #include <hip/hip_runtime.h>
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <torch/extension.h>
@@ -216,6 +217,59 @@ __global__ void __launch_bounds__(1) hip_sparse_nucleus_forward_kernel(
         }
     }
     entropy[row] = row_entropy;
+}
+
+// Rollout already owns the all-gathered, raw vocabulary logits. Sort/deduplicate
+// its compact support and read those logits directly instead of rebuilding TP
+// shards, all-reducing disjoint values, and launching separate gather/pad ops.
+// Only preparation is fused: the historical scorer's actual compiled kernel is
+// reused for FP32 arithmetic. Wider supports use the existing
+// dynamic scorer; 128 is a fast-path geometry, never a sampling limit.
+template <typename scalar_t>
+__global__ void __launch_bounds__(128) hip_replicated_sparse_prepare_kernel(
+    const scalar_t* __restrict__ logits,
+    const int64_t* __restrict__ input_ids,
+    const int64_t* __restrict__ targets,
+    scalar_t* __restrict__ prepared,
+    int64_t* __restrict__ sorted_ids,
+    bool* __restrict__ valid_out,
+    float* __restrict__ inverse,
+    bool* __restrict__ present,
+    int64_t vocab, int64_t columns, float scale, bool transport_sum) {
+    const int row = blockIdx.x;
+    const int lane = threadIdx.x;
+    __shared__ int64_t ids[128];
+    int64_t id = lane < columns ? input_ids[row * columns + lane] : vocab;
+    ids[lane] = id >= 0 && id < vocab ? id : vocab;
+    __syncthreads();
+    for (int size = 2; size <= 128; size *= 2) {
+        for (int stride = size / 2; stride > 0; stride /= 2) {
+            const int peer = lane ^ stride;
+            const int64_t a = ids[lane], b = ids[peer];
+            const bool ascending = (lane & size) == 0;
+            const bool lower = (lane & stride) == 0;
+            const int64_t chosen = ascending == lower ? min(a, b) : max(a, b);
+            __syncthreads();
+            ids[lane] = chosen;
+            __syncthreads();
+        }
+    }
+    id = ids[lane];
+    const bool valid = id < vocab && (lane == 0 || id != ids[lane - 1]);
+    // The original disjoint-owner all-reduce adds positive zero on other ranks.
+    scalar_t value = valid ? logits[row * vocab + id] : static_cast<scalar_t>(0.0f);
+    prepared[row * 128 + lane] = transport_sum
+        ? static_cast<scalar_t>(static_cast<float>(value) + 0.0f) : value;
+    sorted_ids[row * 128 + lane] = id;
+    valid_out[row * 128 + lane] = valid;
+    if (lane == 0) {
+        bool found = false;
+        for (int column = 0; column < 128; ++column) {
+            found |= ids[column] == targets[row] && ids[column] < vocab;
+        }
+        inverse[row] = scale;
+        present[row] = found;
+    }
 }
 
 template <typename scalar_t, int BlockSize, bool FixedWidth = false>
@@ -633,6 +687,45 @@ std::vector<torch::Tensor> hip_sparse_nucleus_logp_forward(
         }));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     return {result, lse, entropy};
+}
+
+std::vector<torch::Tensor> hip_replicated_sparse_nucleus_logp(
+    torch::Tensor logits, torch::Tensor ids, torch::Tensor targets,
+    double inverse_temperature, bool transport_sum) {
+    check_logits(logits);
+    TORCH_CHECK(logits.is_contiguous(), "replicated logits must be contiguous");
+    TORCH_CHECK(ids.dim() == 2 && ids.size(0) == logits.size(0) &&
+                ids.size(1) > 0 && ids.size(1) <= 128 &&
+                ids.scalar_type() == at::ScalarType::Long && ids.is_contiguous(),
+                "replicated support must be contiguous int64 [rows, 1..128]");
+    TORCH_CHECK(targets.dim() == 1 && targets.size(0) == logits.size(0) &&
+                targets.scalar_type() == at::ScalarType::Long && targets.is_contiguous(),
+                "replicated targets must be contiguous int64 [rows]");
+    TORCH_CHECK(ids.device() == logits.device() && targets.device() == logits.device(),
+                "replicated sparse inputs must share one device");
+    TORCH_CHECK(inverse_temperature > 0 && std::isfinite(inverse_temperature),
+                "inverse temperature must be finite and positive");
+    auto options = logits.options().dtype(at::ScalarType::Float);
+    auto prepared = torch::empty({logits.size(0), 128}, logits.options());
+    auto sorted_ids = torch::empty({logits.size(0), 128}, ids.options());
+    auto valid = torch::empty({logits.size(0), 128}, logits.options().dtype(at::ScalarType::Bool));
+    auto inverse = torch::empty({logits.size(0)}, options);
+    auto present = torch::empty({logits.size(0)}, logits.options().dtype(at::ScalarType::Bool));
+    if (logits.size(0)) {
+        auto stream = at::cuda::getCurrentCUDAStream();
+        AT_DISPATCH_FLOATING_TYPES_AND2(
+            at::ScalarType::Half, at::ScalarType::BFloat16, logits.scalar_type(),
+            "hip_replicated_sparse_nucleus_logp", ([&] {
+                hip_replicated_sparse_prepare_kernel<scalar_t><<<logits.size(0), 128, 0, stream>>>(
+                    logits.data_ptr<scalar_t>(), ids.data_ptr<int64_t>(), targets.data_ptr<int64_t>(),
+                    prepared.data_ptr<scalar_t>(), sorted_ids.data_ptr<int64_t>(), valid.data_ptr<bool>(), inverse.data_ptr<float>(),
+                    present.data_ptr<bool>(), logits.size(1), ids.size(1), static_cast<float>(inverse_temperature), transport_sum);
+            }));
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+    }
+    auto result = hip_sparse_nucleus_logp_forward(prepared, sorted_ids, valid, targets, inverse);
+    result.push_back(present);
+    return result;
 }
 
 torch::Tensor hip_sparse_nucleus_logp_backward(

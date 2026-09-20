@@ -592,8 +592,11 @@ def paged_attention_forward(
         schedule = "split" if max_seqlen_q * group <= BLOCK_M else "monolithic"
     if schedule not in ("split", "monolithic"):
         raise ValueError("schedule must be 'auto', 'split' or 'monolithic'")
+    # Decode needs few query rows. Keep the same MFMA instruction and key/chunk
+    # order while avoiding three unused 16-row query tiles in the split kernel.
+    split_block_m = 16 if max_seqlen_q * group <= 16 else BLOCK_M
     common = dict(
-        BLOCK_M=BLOCK_M,
+        BLOCK_M=split_block_m if schedule == "split" else BLOCK_M,
         BLOCK_N=BLOCK_N,
         CHUNK=CHUNK_KV,
         PAGE=PAGE_SIZE,

@@ -151,7 +151,7 @@ export NCCL_NVLS_ENABLE=0
 export HSA_NO_SCRATCH_RECLAIM="${HSA_NO_SCRATCH_RECLAIM:-1}"
 # Keep the inherited CPU allocation; do not let HIP narrow all Ray workers to
 # the same cores. Preserve an explicit operator override, including empty.
-export AMD_CPU_AFFINITY="${AMD_CPU_AFFINITY-0}"
+export AMD_CPU_AFFINITY="${AMD_CPU_AFFINITY-}"
 export VLLM_ROCM_USE_AITER=1
 # The strict paged materializer consumes AITER's packed NHD cache and rejects
 # the optional shuffled physical layout.

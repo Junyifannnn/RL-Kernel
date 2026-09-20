@@ -140,19 +140,27 @@ inspect the command without launching a job.
 For the ROCm MI300X G11 performance configuration, use:
 
 ```bash
-./rlk run --tp 4 --cp 2 --rollout-tp 4 --temperature 0.7 --top-p 0.95 \
+./rlk run --backend rocm --mode consistency \
+  --tp 4 --cp 2 --rollout-tp 4 --rollout-cp 1 \
+  --temperature 0.7 --top-p 0.95 \
   --lr 5e-7 --kl-coef 0.01 --max-response-len 6912 \
   --grpo-std-normalization disabled --steps 200
 ```
 
-The ROCm consistency route uses Triton chunked Attention, reuses the LM-head
-logits, and fuses sparse top-p logprob with monitoring entropy. Training logprobs
-are independently recomputed; rollout-logprob reuse stays **off**. Parameters
-above are command-line choices, not kernel constants. Use the updated ROCm
-companion patches and rebuild the extension after updating this checkout.
-Add `--mode native` to the same command for the comparison.
-The ROCm launcher also preserves the inherited CPU allocation during HIP
-initialization; no extra Quick start argument is needed.
+This exact command enters the ROCm `R/R` consistency arm. It selects Triton
+chunked Attention, the sparse top-p logprob/entropy path, and the deterministic
+training logprob route; it also preserves the inherited CPU allocation instead
+of applying the old eight-core affinity bottleneck. Training logprobs are
+independently recomputed, `--use-rollout-logprobs` remains **off**, and the
+run fails validation unless the recorded train/rollout logprobs are bitwise
+equal. Parameters above are command-line choices, not kernel constants. Use
+the updated ROCm companion patches and rebuild the extension after updating
+this checkout. Add `--mode native` to the same command for the comparison.
+
+The affinity and Triton settings are the path used for the G10-like step-time
+comparison. Exact wall-clock values still depend on generated lengths and
+warmup, so compare native and consistency runs with the same command and
+recorded workload.
 
 The historical 200-step result was 62.47 vs 59.70 end-to-end tok/GPU/s
 (G11 4.44% lower); both historical runs enabled rollout-logprob reuse and

@@ -212,6 +212,16 @@ def _qwen3_ffn_packed_tp_inference_rocm(
         # Resolve it inside this opaque operation before the physical reduction.
         _C.deterministic_collective_rocm_ipc_all_reduce_input(runtime_handle, partial, output)
         return output.reshape(*input_shape[:-1], down_weight.shape[0])
+    if rows <= 8 and rows * down_weight.shape[0] * rmsnorm_output.element_size() <= 64 * 1024:
+        # Tiny decode outputs use the one-block fixed-tree transport. Finishing
+        # the local GEMM first permits reserve/copy/reduce/done in one launch.
+        local = _qwen3_ffn_packed_inference(
+            rmsnorm_output, fused_gate_up_weight, down_weight,
+        ).reshape(rows, down_weight.shape[0])
+        output = (stable_output.narrow(0, 0, rows) if rows <= staging.size(0)
+                  else torch.empty_like(local))
+        _C.deterministic_collective_rocm_ipc_all_reduce_input(runtime_handle, local, output)
+        return output.reshape(*input_shape[:-1], down_weight.shape[0])
     if rows <= staging.size(0):
         # Keep the output address stable across piecewise HIP-graph capture and
         # replay so the next captured partition reads the current invocation.

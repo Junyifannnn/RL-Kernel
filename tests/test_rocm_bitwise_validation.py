@@ -31,10 +31,11 @@ def test_strict_validator_compares_bits_including_signed_zero(tmp_path, rollout_
     assert result["torch_equal"] is True
 
 
+@pytest.mark.parametrize("replicated", [False, True])
 @pytest.mark.parametrize(
     "missing", [None, "strict_entrypoint", "contract_version", "lm_head_result_reused"]
 )
-def test_sparse_backend_requires_explicit_contract_evidence(missing):
+def test_sparse_backend_requires_explicit_contract_evidence(missing, replicated):
     from examples.vime_rocm_attention_ablation.validate_artifacts import (
         STRICT_LINEAR_LOGP_BACKEND_ID,
         _validate_strict_dense_record,
@@ -49,6 +50,12 @@ def test_sparse_backend_requires_explicit_contract_evidence(missing):
         "lm_head_result_reused": True,
         "deterministic_linear_logp": True,
     }
+    if replicated:
+        provenance.update(
+            strict_entrypoint="sparse_nucleus_logp_from_replicated_logits",
+            replicated_logits_reused=True, additional_tp_collective=False,
+            preparation_backend="rlkernel.sparse_nucleus.hip_replicated.v1",
+        )
     if missing:
         provenance.pop(missing)
     record = {
@@ -61,6 +68,6 @@ def test_sparse_backend_requires_explicit_contract_evidence(missing):
     }
     errors = []
     _validate_strict_dense_record(
-        record, module="logp", framework="megatron", label="test", errors=errors
+        record, module="logp", framework="vllm" if replicated else "megatron", label="test", errors=errors
     )
     assert bool(errors) is (missing is not None)

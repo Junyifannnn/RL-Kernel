@@ -563,7 +563,11 @@ def build_arm_environment(
     env = dict(os.environ if base_environment is None else base_environment)
     # Preserve the caller's CPU allocation across HIP initialization. Some ROCm
     # runtimes otherwise narrow every worker to the same small CPU mask.
-    env.setdefault("AMD_CPU_AFFINITY", "0")
+    # Do not force ROCm/Ray workers onto the first CPU partition.  The
+    # historical G10/G11 runs inherited the host affinity; setting ``0`` here
+    # leaves vLLM decode and sampler bookkeeping on only eight cores and is a
+    # large rollout regression.  Keep an explicit user value unchanged.
+    env.setdefault("AMD_CPU_AFFINITY", "")
     for name in _CUDA_ONLY_ENVIRONMENT:
         env.pop(name, None)
     for name in _PROXY_ENVIRONMENT:

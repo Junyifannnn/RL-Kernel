@@ -421,8 +421,28 @@ def _validate_strict_dense_record(
         "rlkernel.sparse_nucleus.hip_serial_deterministic.v12",
     )
     if sparse:
+        replicated = _has_exact_value(
+            provenance, {"strict_entrypoint"}, "sparse_nucleus_logp_from_replicated_logits"
+        )
+        if replicated:
+            if framework != "vllm":
+                errors.append(f"{label} replicated sparse scorer is inference-only")
+            for key, value in {
+                "replicated_logits_reused": True,
+                "additional_tp_collective": False,
+                "preparation_backend": "rlkernel.sparse_nucleus.hip_replicated.v1",
+            }.items():
+                proven = (
+                    any(item is value for item in _values_for_keys(provenance, {key}))
+                    if isinstance(value, bool) else _has_exact_value(provenance, {key}, value)
+                )
+                if not proven:
+                    errors.append(f"{label} did not prove replicated sparse {key}={value!r}")
         for key, value in {
-            "strict_entrypoint": "sparse_nucleus_logp_from_local_logits_tp",
+            "strict_entrypoint": (
+                "sparse_nucleus_logp_from_replicated_logits" if replicated
+                else "sparse_nucleus_logp_from_local_logits_tp"
+            ),
             "contract_version": "sparse-nucleus-hip-serial-deterministic-v12",
         }.items():
             if not _has_exact_value(provenance, {key}, value):

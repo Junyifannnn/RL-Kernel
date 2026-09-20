@@ -443,13 +443,10 @@ __global__ void ipc_mark_signal_kernel(uint64_t* signal, uint64_t sequence) {
   }
 }
 
-__global__ void ipc_reserve_sequence_kernel(
+__device__ __forceinline__ void ipc_reserve_sequence(
     PeerSignals signals,
     int64_t rank,
     int64_t world_size) {
-  if (blockIdx.x != 0 || threadIdx.x != 0) {
-    return;
-  }
   uint64_t sequence = 0;
   if (rank == 0) {
     const uint64_t previous = __hip_atomic_load(
@@ -500,13 +497,17 @@ __global__ void ipc_reserve_sequence_kernel(
   }
 }
 
-__global__ void ipc_mark_ready_and_wait_dynamic_kernel(
+__global__ void ipc_reserve_sequence_kernel(
+    PeerSignals signals, int64_t rank, int64_t world_size) {
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    ipc_reserve_sequence(signals, rank, world_size);
+  }
+}
+
+__device__ __forceinline__ void ipc_mark_ready_and_wait_dynamic(
     PeerSignals signals,
     int64_t rank,
     int64_t world_size) {
-  if (blockIdx.x != 0 || threadIdx.x != 0) {
-    return;
-  }
   const uint64_t sequence = __hip_atomic_load(
       signals.sequence[rank],
       __ATOMIC_ACQUIRE,
@@ -526,6 +527,31 @@ __global__ void ipc_mark_ready_and_wait_dynamic_kernel(
   }
 }
 
+__global__ void ipc_mark_ready_and_wait_dynamic_kernel(
+    PeerSignals signals, int64_t rank, int64_t world_size) {
+  if (blockIdx.x == 0 && threadIdx.x == 0) {
+    ipc_mark_ready_and_wait_dynamic(signals, rank, world_size);
+  }
+}
+
+// Decode payloads fit in one block. Keep the original sequence ownership and
+// system-scope release/acquire protocol, but reserve, copy, and publish them in
+// one launch. The numerical reduction below is unchanged. Larger or unaligned
+// inputs retain the regular staged transport.
+__global__ void ipc_stage_small_kernel(
+    PeerSignals signals, int64_t rank, int64_t world_size,
+    const uint4* input, uint4* output, int64_t vector_count) {
+  if (threadIdx.x == 0) ipc_reserve_sequence(signals, rank, world_size);
+  __syncthreads();
+  for (int64_t index = threadIdx.x; index < vector_count; index += blockDim.x) {
+    output[index] = input[index];
+  }
+  // Publish every thread's writes before thread 0 releases the ready signal.
+  __threadfence_system();
+  __syncthreads();
+  if (threadIdx.x == 0) ipc_mark_ready_and_wait_dynamic(signals, rank, world_size);
+}
+
 __global__ void ipc_mark_done_dynamic_kernel(PeerSignals signals, int64_t rank) {
   if (blockIdx.x == 0 && threadIdx.x == 0) {
     const uint64_t sequence = __hip_atomic_load(
@@ -537,6 +563,31 @@ __global__ void ipc_mark_done_dynamic_kernel(PeerSignals signals, int64_t rank) 
         sequence,
         __ATOMIC_RELEASE,
         __HIP_MEMORY_SCOPE_SYSTEM);
+  }
+}
+
+template <typename scalar_t, int WorldSize>
+__global__ void ipc_small_all_reduce_kernel(
+    PeerSignals signals, PeerPointers peers, int64_t rank,
+    const uint4* input, scalar_t* output, int64_t vector_count, int64_t elements) {
+  if (threadIdx.x == 0) ipc_reserve_sequence(signals, rank, WorldSize);
+  __syncthreads();
+  auto* destination = reinterpret_cast<uint4*>(const_cast<void*>(peers.values[rank]));
+  for (int64_t index = threadIdx.x; index < vector_count; index += blockDim.x) {
+    destination[index] = input[index];
+  }
+  __threadfence_system();
+  __syncthreads();
+  if (threadIdx.x == 0) ipc_mark_ready_and_wait_dynamic(signals, rank, WorldSize);
+  __syncthreads();
+  for (int64_t index = threadIdx.x; index < elements; index += blockDim.x) {
+    output[index] = ipc_fixed_tree_reduce<scalar_t, WorldSize>(peers, index);
+  }
+  __syncthreads();
+  if (threadIdx.x == 0) {
+    const uint64_t sequence = __hip_atomic_load(
+        signals.sequence[rank], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_SYSTEM);
+    __hip_atomic_store(signals.done[rank], sequence, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
   }
 }
 
@@ -892,6 +943,20 @@ class ROCmIPCCollectiveState {
     const int64_t input_bytes = input.numel() * input.element_size();
     TORCH_CHECK(input_bytes <= capacity_bytes_,
                 "input exceeds ROCm IPC staging capacity");
+    if (input_bytes > 0 && input_bytes <= 64 * 1024 &&
+        input_bytes % sizeof(uint4) == 0 &&
+        reinterpret_cast<uintptr_t>(input.data_ptr()) % alignof(uint4) == 0) {
+      hipLaunchKernelGGL(
+          ipc_stage_small_kernel, dim3(1), dim3(256), 0, stream,
+          signals_, rank_, world_size_,
+          reinterpret_cast<const uint4*>(input.data_ptr()),
+          reinterpret_cast<uint4*>(const_cast<void*>(peers_.values[rank_])),
+          input_bytes / sizeof(uint4));
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+      staged_bytes_ = input_bytes;
+      staged_type_ = input.scalar_type();
+      return;
+    }
     launch_reserve_sequence(signals_, rank_, world_size_, stream);
     if (input_bytes > 0) {
       C10_HIP_CHECK(hipMemcpyAsync(
@@ -937,6 +1002,39 @@ class ROCmIPCCollectiveState {
     check_reduction_output(output, staged_bytes_, "all_reduce");
     launch(output, 0, output.numel(), stream);
     launch_mark_done_dynamic(signals_, rank_, stream);
+  }
+
+  void all_reduce_input(torch::Tensor input, torch::Tensor output, hipStream_t stream) {
+    const int64_t bytes = input.numel() * input.element_size();
+    if (bytes <= 0 || bytes > 64 * 1024 || bytes % sizeof(uint4) != 0 ||
+        reinterpret_cast<uintptr_t>(input.data_ptr()) % alignof(uint4) != 0) {
+      stage(input, stream);
+      all_reduce(output, stream);
+      return;
+    }
+    check_tensor(input, "small all_reduce input");
+    TORCH_CHECK(bytes <= capacity_bytes_, "small all_reduce exceeds staging capacity");
+    staged_bytes_ = bytes;
+    staged_type_ = input.scalar_type();
+    check_reduction_output(output, bytes, "small all_reduce");
+    #define RLK_SMALL_REDUCE(W) \
+            hipLaunchKernelGGL((ipc_small_all_reduce_kernel<scalar_t, W>), \
+                dim3(1), dim3(256), 0, stream, signals_, peers_, rank_, \
+                reinterpret_cast<const uint4*>(input.data_ptr()), output.data_ptr<scalar_t>(), \
+                bytes / sizeof(uint4), input.numel())
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half, at::ScalarType::BFloat16, input.scalar_type(),
+        "ipc_small_all_reduce", ([&] {
+          switch (world_size_) {
+            case 1: RLK_SMALL_REDUCE(1); break;
+            case 2: RLK_SMALL_REDUCE(2); break;
+            case 4: RLK_SMALL_REDUCE(4); break;
+            case 8: RLK_SMALL_REDUCE(8); break;
+            default: TORCH_CHECK(false, "unsupported small all_reduce world size");
+          }
+        }));
+    #undef RLK_SMALL_REDUCE
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
   void reduce_scatter(torch::Tensor output, hipStream_t stream) const {
@@ -1262,8 +1360,7 @@ void deterministic_collective_rocm_ipc_all_reduce_input(
   const c10::cuda::CUDAGuard device_guard(input.device());
   const auto stream = at::cuda::getCurrentCUDAStream();
   auto* state = ipc_state(handle);
-  state->stage(input, stream);
-  state->all_reduce(output, stream);
+  state->all_reduce_input(input, output, stream);
 }
 
 void deterministic_collective_rocm_ipc_reduce_scatter(

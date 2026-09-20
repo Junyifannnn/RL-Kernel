@@ -13,8 +13,9 @@ import rl_engine.integrations.framework_operators as operators
 @pytest.mark.parametrize("top_p", [0.95, 1.0])
 @pytest.mark.parametrize("worker", [True, False])
 @pytest.mark.parametrize("temperature", [0.3, 0.7, 1.6])
+@pytest.mark.parametrize("inference", [False, True])
 def test_sampler_replays_active_request_support_and_preserves_raw_logits(
-    monkeypatch, top_p, worker, temperature
+    monkeypatch, top_p, worker, temperature, inference
 ):
     monkeypatch.setattr(operators, "_require_nvidia_cuda", lambda *_: None)
     monkeypatch.setattr(torch.version, "hip", "test")
@@ -67,6 +68,16 @@ def test_sampler_replays_active_request_support_and_preserves_raw_logits(
             assert torch.equal(replay_ids, result.logprobs_tensors.logprob_token_ids)
             return torch.tensor([-2.5])
 
+        def from_replicated_logits_sparse_nucleus(self, logits, ids, replay_ids, **kwargs):
+            assert torch.equal(logits, torch.arange(8).reshape(1, 8).float())
+            assert kwargs == {"real_vocab_size": 8, "temperature": temperature, "tp_group": None}
+            self.provenance = {
+                **self.provenance,
+                "strict_entrypoint": "sparse_nucleus_logp_from_replicated_logits",
+            }
+            calls.append("replicated")
+            return torch.tensor([-2.5])
+
     monkeypatch.setattr(operators, "LinearLogpWrapper", Wrapper)
     sampler = SimpleNamespace(
         sampling_states=SimpleNamespace(top_p=SimpleNamespace(np=np.array([0.5, top_p, 0.8])))
@@ -82,6 +93,10 @@ def test_sampler_replays_active_request_support_and_preserves_raw_logits(
 
     metadata.temperature = RocmTemperature()
     op = operators.VllmLogpOperator(native, worker_sampler=worker, strict_linear_logp=True)
-    actual = op(sampler, torch.arange(8).reshape(1, 8).float(), metadata)
-    assert calls == (["dense", "top_p"] if top_p < 1 else ["dense"])
+    with torch.no_grad() if inference else torch.enable_grad():
+        actual = op(sampler, torch.arange(8).reshape(1, 8).float(), metadata)
+    expected = ["replicated"] if inference and worker and top_p < 1 else (
+        ["dense", "top_p"] if top_p < 1 else ["dense"]
+    )
+    assert calls == expected
     assert torch.equal(actual.logprobs_tensors.logprobs, torch.tensor([[-2.5, -2.5, 0.0]]))

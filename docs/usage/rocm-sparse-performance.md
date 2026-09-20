@@ -135,15 +135,16 @@ isolate an affinity cost or explain the entire training increase. The historical
 first step was 95.110 seconds, so this experiment does not establish the
 historical 0.2069% mean step-time advantage.
 
-The launcher now defaults `AMD_CPU_AFFINITY=0` before HIP initialization and
-forwards it to Ray workers in both native and consistency modes. Explicit
-operator overrides are preserved and the effective value is recorded in
-`launch.json`. This disables the runtime's affinity reset without choosing a
-CPU count or overriding an inherited `taskset` allocation. Initialization probes
-confirmed 160 CPUs stay 160; caller masks 0-7 and 80-87 also remain unchanged
-through device discovery and `torch.cuda.init()`. The actual shell exports and
-Ray runtime-env construction were checked with default, `0`, `1`, and empty
-overrides. CLI regression tests: 32 passed, one Windows symlink test skipped.
+The launcher now leaves `AMD_CPU_AFFINITY` empty by default before HIP
+initialization and forwards an explicit operator override unchanged to Ray
+workers in both native and consistency modes. This preserves the inherited
+CPU allocation instead of applying the old eight-core affinity bottleneck.
+The effective value is recorded in `launch.json`; an operator can still set a
+specific mask explicitly. Initialization probes confirmed caller masks remain
+unchanged through device discovery and `torch.cuda.init()`. The actual shell
+exports and Ray runtime-env construction were checked with default, `0`, `1`,
+and empty overrides. CLI regression tests: 32 passed, one Windows symlink
+test skipped.
 
 The final environment default applies before initialization to training as well
 as rollout. It is not identical to the diagnostic's live vLLM-only intervention;

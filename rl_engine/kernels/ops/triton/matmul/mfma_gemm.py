@@ -73,6 +73,10 @@ def select_config(m_size: int, n_size: int, k_size: int) -> MfmaGemmConfig:
         # N-parallel programs on its widest projections.  Keep the one-row
         # QKV case on the lower-overhead default.
         if k_size == 4096 and (n_size == 6144 or (n_size == 1536 and m_size > 1)):
+            # On the current gfx942 compiler, the smaller tile is faster for
+            # 1--8 decode rows. Only scheduling changes, not K accumulation.
+            if m_size <= 8:
+                return _DECODE_CONFIG
             return _QWEN_QKV_GATE_DECODE_CONFIG
         if k_size == 4096 and n_size >= 32768:
             return _QWEN_LM_HEAD_DECODE_CONFIG
