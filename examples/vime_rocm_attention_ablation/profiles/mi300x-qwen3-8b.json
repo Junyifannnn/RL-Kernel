@@ -32,6 +32,6 @@
     "max-tokens-per-gpu": 4096,
     "ray-port": 8090,
     "ray-dashboard-port": 48025,
-    "vllm-gpu-memory-utilization": 0.38
+    "vllm-gpu-memory-utilization": 0.4
   }
 }

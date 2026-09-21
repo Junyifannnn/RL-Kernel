@@ -128,7 +128,8 @@ or select a profile with RLK_REPRO_PROFILE. No launcher edits are needed.
 Both backends then use the same command:
 
 ```bash
-./rlk run --tp 4 --rollout-tp 4 --temperature 0.7 --top-p 0.95 --lr 5e-7 --steps 200
+./rlk run --tp 4 --rollout-tp 4 --temperature 0.7 --top-p 0.95 \
+  --lr 5e-7 --kl-coef 0.01 --max-response-len 6912 --max-tokens-per-gpu 4096 --steps 200
 ```
 
 Training TP and rollout TP are independent: choose 1, 2, 4 or 8. Training CP
@@ -141,6 +142,10 @@ On ROCm, this command selects Triton chunked Attention and sparse top-p
 logprob/monitoring-entropy scoring. Training logprobs are independently
 recomputed and validation requires bitwise agreement with rollout. Apply the
 updated ROCm companion patches and rebuild the extension when updating.
+With the supplied ROCm profile, a three-step check measured 58.29 s/step
+versus native's 57.40 s (+1.55%), with zero raw-bit logprob mismatches.
+Use `--steps 3` for that short check; timing depends on generated lengths and
+the environment, and the native execution-record limitation is documented below.
 See [ROCm performance reproduction](./docs/usage/rocm-sparse-performance.md)
 for the full comparison command, measurements and validation limits.
 

@@ -379,6 +379,7 @@ def mfma_gemm(
         partial.stride(1),
         partial.stride(2),
         CHUNK_UNROLL=chunk_unroll,
+        schedule_hint="memory-bound-attention" if chunk_unroll == 4 else "none",
         **common,
     )
     reduce_block = 1024
